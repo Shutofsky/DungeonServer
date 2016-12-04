@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 from Tkinter import *
 import paho.mqtt.client as mqtt
-import socket, sqlite3
+import socket, sqlite3, time
+from datetime import datetime
+from datetime import timedelta
 import image
 #import Image
 import time
 
-mqtt_broker_ip = '10.23.192.193'
+mqtt_broker_ip = '192.168.0.103'
 mqtt_broker_port = 1883
+
 dbName = 'DungeonStatus.db'
 
 colorRus = []
@@ -51,6 +54,14 @@ frameLock = []
 buttonOpenLock = []
 buttonBlockLock = []
 
+termPongTime = dict()
+
+start_time = datetime.now()
+def millis():
+    dt = datetime.now() - start_time
+    ms = (dt.days * 24 * 60 * 60 + dt.seconds) * 1000 + dt.microseconds / 1000.0
+    return ms
+
 def getDBData():
     global currentBaseStatus
     global dbName
@@ -88,7 +99,10 @@ def getDBData():
         termMenu[row[0]] = row[6]
         termMsgHead[row[0]] = row[8]
         termMsgBody[row[0]] = row[9]
-    conn.close()
+        if row[1] == 'YES':
+            termPongTime[row[0]] = millis()
+        else:
+            termPongTime[row[0]] = millis() - 10000
     conn.close()
 
 def changeStatus():
@@ -144,8 +158,6 @@ def blockLock(num, ipAddress):
         # Добавить MQTT команду на блокировку замка по IP и запись в локальную базу
 
 def terminalUpdate(num,ipAddress):
-
-
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
     req.execute("UPDATE term SET Msg_head = ?, Msg_body = ? WHERE Id == ?", \
@@ -174,9 +186,55 @@ def terminalUpdate(num,ipAddress):
 
     conn.close()
 
+def on_connect(client, userdata, flags, rc):
+    client.subscribe("TERMASK/#")
 
+def on_message(client, userdata, msg):
+    global my_ip
+    commList = str(msg.payload).split('/')
+    if commList[1] == 'PONG':
+        if commList[0] in termLive.keys():
+            termPongTime[commList[0]] = millis()
+
+client_time = millis()
+
+def workThread():
+    global client_time
+    global client
+
+    print client_time
+
+    labelStatus.after(1000,workThread)
+    c_time = millis()
+    if c_time >= client_time + 3000:
+        client.publish("TERM", '*/PING')
+        client_time = c_time
+        conn = sqlite3.connect(dbName)
+        req = conn.cursor()
+        j = 0
+        for ipTerm in sorted(termPongTime.keys()):
+            if c_time >= termPongTime[ipTerm] + 10000:
+                req.execute("UPDATE term SET Alive = 'NO' WHERE Id == ?",[ipTerm])
+                termLive[ipTerm] = 'NO'
+                bg = 'red'
+            else:
+                req.execute("UPDATE term SET Alive = 'YES' WHERE Id == ?",[ipTerm])
+                termLive[ipTerm] = 'YES'
+                bg = 'green'
+            conn.commit()
+            print ipTerm
+            labelTerm[j]['bg'] = bg
+            j += 1
+        conn.close()
+        print '3 sec'
 
 getDBData()
+
+client = mqtt.Client()
+client.on_connect = on_connect
+client.on_message = on_message
+client.connect(mqtt_broker_ip, mqtt_broker_port, 5)
+client.loop_start()
 
 root = Tk()
 root.title(u'Сервер управления базой')
@@ -186,6 +244,9 @@ statusFrame = Frame(root)
 labelStatus = Label(statusFrame,text=u'Текущий стаус базы: '+statusRussian[currentBaseStatus],\
 width=30,bg=currentBaseStatus,fg=statusFontColor[currentBaseStatus],font='arial 13')
 labelStatus.grid(row=0,column=0)
+
+labelStatus.after_idle(workThread)
+
 listStatus = Listbox(statusFrame,selectmode=SINGLE,height=2,width=30)
 for i in colorRus:
      listStatus.insert(END,i) 
@@ -249,7 +310,7 @@ for i in sorted(termLive.keys()):
     if termHack[i] == 'YES':
         tButtonH = Radiobutton(frameTerm[j], text="Взломан", variable=termHackButtonV[j], \
                               value='YES')
-        tButtoH.select()
+        tButtonH.select()
         tButtonH.grid(row=1, column=0, sticky=W)
         tButtonH = Radiobutton(frameTerm[j], text="Не взломан", variable=termHackButtonV[j], \
                               value='NO')
@@ -327,3 +388,5 @@ for i in sorted(termLive.keys()):
 termFrame.grid(row=2, column=0, sticky=W)
 
 root.mainloop()
+
+#root.mainloop()

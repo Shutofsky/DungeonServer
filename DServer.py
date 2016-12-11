@@ -4,11 +4,11 @@ import paho.mqtt.client as mqtt
 import socket, sqlite3, time
 from datetime import datetime
 from datetime import timedelta
-import image
-#import Image
+#import image
+import Image
 import time
 
-mqtt_broker_ip = '192.168.0.103'
+mqtt_broker_ip = '10.23.192.193'
 mqtt_broker_port = 1883
 
 dbName = 'DungeonStatus.db'

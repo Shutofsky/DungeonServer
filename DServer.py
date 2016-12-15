@@ -26,6 +26,11 @@ labelStatusLock = []
 termLive = dict()
 termHack = dict()
 termHackButtonV = []
+tButtonHY = []
+tButtonHN = []
+tButtonLY = []
+tButtonLN = []
+termNumber = dict()
 termMainButton = []
 termHackButton = dict()
 termLock = dict()
@@ -48,6 +53,7 @@ termResult = dict()
 termMenu = dict()
 termMsgHead = dict()
 termMsgBody = dict()
+termDBUpdate = dict()
 frameTerm = []
 labelTerm = []
 frameLock = []
@@ -99,6 +105,7 @@ def getDBData():
         termMenu[row[0]] = row[6]
         termMsgHead[row[0]] = row[8]
         termMsgBody[row[0]] = row[9]
+        termDBUpdate[row[0]] = 0
         if row[1] == 'YES':
             termPongTime[row[0]] = millis()
         else:
@@ -160,15 +167,20 @@ def blockLock(num, ipAddress):
 def terminalUpdate(num,ipAddress):
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
+    sTmp = termMBody[num].get(1.0, END)
     req.execute("UPDATE term SET Msg_head = ?, Msg_body = ? WHERE Id == ?", \
-                [termMHead[num].get(), termMBody[num].get(1.0, END), ipAddress])
+                [termMHead[num].get(), sTmp.rstrip(), ipAddress])
     conn.commit()
-    # добавить MQTT обновление заголовка и тела сообщения
+
+    client.publish('TERM', ipAddress + '/MAILHEAD/' + termMHead[num].get())
+    client.publish('TERM', ipAddress + '/MAILBODY/' + sTmp.rstrip())
 
     req.execute("UPDATE term SET Lock_status = ?, Hack_status = ? WHERE Id == ?", \
                 [termLockButtonV[num].get(), termHackButtonV[num].get(), ipAddress])
     conn.commit()
-    # добавить MQTT обновление статуса взлома и блокировки
+
+    client.publish('TERM', ipAddress + '/LOCK/' + termLockButtonV[num].get())
+    client.publish('TERM', ipAddress + '/HACK/' + termHackButtonV[num].get())
 
     s = termMListBL[num].get() + termMListBA[num].get() + termMListBT[num].get()
     tmpMenuList = []
@@ -180,10 +192,10 @@ def terminalUpdate(num,ipAddress):
     strMenuList = ''.join(tmpMenuList)
     req.execute("UPDATE term SET Menulist = ? WHERE Id == ?", \
                 [strMenuList, ipAddress])
-    # добавить MQTT обновление списка меню
+
+    client.publish('TERM', ipAddress + '/MENULIST/' + strMenuList)
 
     conn.commit()
-
     conn.close()
 
 def on_connect(client, userdata, flags, rc):
@@ -191,42 +203,113 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     global my_ip
+    global dbName
     commList = str(msg.payload).split('/')
-    if commList[1] == 'PONG':
-        if commList[0] in termLive.keys():
+    print str(msg.payload)
+    if commList[0] in termLive.keys():
+        j = termNumber[commList[0]]
+        if commList[1] == 'PONG':
             termPongTime[commList[0]] = millis()
+        if commList[1] == 'Hack_status':
+            if commList[2] != termHackButtonV[j]:
+                sqlOper = "UPDATE term SET " + commList[1] + "='" + commList[2] + "' WHERE Id == '" + commList[0] + "'"
+                conn = sqlite3.connect(dbName)
+                req = conn.cursor()
+                req.execute(sqlOper)
+                conn.commit()
+                conn.close()
+                if commList[2] == 'YES':
+                    tButtonHY[j].select()
+                else:
+                    tButtonHN[j].select()
+        elif commList[1] == 'Lock_status':
+            if commList[2] != termLockButtonV[j]:
+                sqlOper = "UPDATE term SET " + commList[1] + "='" + commList[2] + "' WHERE Id == '" + \
+                          commList[0] + "'"
+                conn = sqlite3.connect(dbName)
+                req = conn.cursor()
+                req.execute(sqlOper)
+                conn.commit()
+                conn.close()
+                if commList[2] == 'YES':
+                    tButtonLY[j].select()
+                else:
+                    tButtonLN[j].select()
+        elif commList[1] == 'Menulist':
+            tmplist = termMenu[commList[0]].split(",")
+            if "1" in tmplist:
+                termMListButtonLock[j].select()
+            else:
+                termMListButtonLock[j].deselect()
+            if "2" in tmplist:
+                termMListButtonAlert[j].select()
+            else:
+                termMListButtonAlert[j].deselect()
+            if "3" in tmplist:
+                termMListButtonText[j].select()
+            else:
+                termMListButtonText[j].deselect()
+            sqlOper = "UPDATE term SET " + commList[1] + "='" + commList[2] + "' WHERE Id == '" + \
+                        commList[0] + "'"
+            conn = sqlite3.connect(dbName)
+            req = conn.cursor()
+            req.execute(sqlOper)
+            conn.commit()
+            conn.close()
+        elif commList[1] == 'Msg_head':
+            if commList[2].decode('utf-8') != termMHead[j].get():
+                termMHead[j].delete(0, END)
+                termMHead[j].insert(0, commList[2])
+                conn = sqlite3.connect(dbName)
+                req = conn.cursor()
+                req.execute("UPDATE term SET Msg_head = ? WHERE Id == ?", \
+                            [commList[2].decode('utf-8'), commList[0]])
+                conn.commit()
+                conn.close()
+        elif commList[1] == 'Msg_body':
+            sTmp = termMBody[j].get(1.0,END)
+            if commList[2].decode('utf-8') != sTmp.rstrip():
+                termMBody[j].delete(1.0, END)
+                termMBody[j].insert(END, commList[2])
+                conn = sqlite3.connect(dbName)
+                req = conn.cursor()
+                req.execute("UPDATE term SET Msg_body = ? WHERE Id == ?", \
+                            [commList[2].decode('utf-8'), commList[0]])
+                conn.commit()
+                conn.close()
 
 client_time = millis()
 
 def workThread():
     global client_time
     global client
-
-    print client_time
-
-    labelStatus.after(1000,workThread)
+    global termDBUpdate
     c_time = millis()
-    if c_time >= client_time + 3000:
+    if c_time >= client_time + 1500:
         client.publish("TERM", '*/PING')
         client_time = c_time
         conn = sqlite3.connect(dbName)
         req = conn.cursor()
         j = 0
         for ipTerm in sorted(termPongTime.keys()):
-            if c_time >= termPongTime[ipTerm] + 10000:
+            if c_time >= termPongTime[ipTerm] + 4000:
                 req.execute("UPDATE term SET Alive = 'NO' WHERE Id == ?",[ipTerm])
                 termLive[ipTerm] = 'NO'
                 bg = 'red'
+                termDBUpdate[ipTerm] = 0
             else:
                 req.execute("UPDATE term SET Alive = 'YES' WHERE Id == ?",[ipTerm])
                 termLive[ipTerm] = 'YES'
                 bg = 'green'
+                if(termDBUpdate[ipTerm] == 0):
+                    client.publish("TERM",ipTerm + '/GETDB')
+                    termDBUpdate[ipTerm] = 1
             conn.commit()
-            print ipTerm
+#            print ipTerm
             labelTerm[j]['bg'] = bg
             j += 1
         conn.close()
-        print '3 sec'
+    labelStatus.after(1000, workThread)
 
 getDBData()
 
@@ -305,42 +388,42 @@ for i in sorted(termLive.keys()):
     frameTerm.append(Frame(termFrame, bd=2))
     labelTerm.append(Label(frameTerm[j], text=i, fg=fgLock, bg=bgLock, font='arial 13'))
     labelTerm[j].grid(row=0, column=0, columnspan=5, sticky=W)
-
+    termNumber[i] = j
     termHackButtonV.append(StringVar())
     if termHack[i] == 'YES':
-        tButtonH = Radiobutton(frameTerm[j], text="Взломан", variable=termHackButtonV[j], \
-                              value='YES')
-        tButtonH.select()
-        tButtonH.grid(row=1, column=0, sticky=W)
-        tButtonH = Radiobutton(frameTerm[j], text="Не взломан", variable=termHackButtonV[j], \
-                              value='NO')
-        tButtonH.grid(row=2, column=0, sticky=W)
+        tButtonHY.append(Radiobutton(frameTerm[j], text="Взломан", variable=termHackButtonV[j], \
+                              value='YES'))
+        tButtonHY[j].select()
+        tButtonHY[j].grid(row=1, column=0, sticky=W)
+        tButtonHN.append(Radiobutton(frameTerm[j], text="Не взломан", variable=termHackButtonV[j], \
+                              value='NO'))
+        tButtonHN[j].grid(row=2, column=0, sticky=W)
     else:
-        tButtonH = Radiobutton(frameTerm[j], text="Взломан", variable=termHackButtonV[j], \
-                              value='YES')
-        tButtonH.grid(row=1, column=0, sticky=W)
-        tButtonH = Radiobutton(frameTerm[j], text="Не взломан", variable=termHackButtonV[j], \
-                              value='NO')
-        tButtonH.select()
-        tButtonH.grid(row=2, column=0, sticky=W)
+        tButtonHY.append(Radiobutton(frameTerm[j], text="Взломан", variable=termHackButtonV[j], \
+                              value='YES'))
+        tButtonHY[j].grid(row=1, column=0, sticky=W)
+        tButtonHN.append(Radiobutton(frameTerm[j], text="Не взломан", variable=termHackButtonV[j], \
+                              value='NO'))
+        tButtonHN[j].select()
+        tButtonHN[j].grid(row=2, column=0, sticky=W)
 
     termLockButtonV.append(StringVar())
     if termLock[i] == 'YES':
-        tButtonL = Radiobutton(frameTerm[j], text="Блокирован", variable=termLockButtonV[j], \
-                              value='YES')
-        tButtonL.select()
-        tButtonL.grid(row=1, column=1, sticky=W)
-        tButtonL = Radiobutton(frameTerm[j], text="Разблокирован", variable=termLockButtonV[j], \
-                              value='NO')
-        tButtonL.grid(row=2, column=1, sticky=W)
+        tButtonLY.append(Radiobutton(frameTerm[j], text="Блокирован", variable=termLockButtonV[j], \
+                              value='YES'))
+        tButtonLY[j].select()
+        tButtonLY[j].grid(row=1, column=1, sticky=W)
+        tButtonLN.append(Radiobutton(frameTerm[j], text="Разблокирован", variable=termLockButtonV[j], \
+                              value='NO'))
+        tButtonLN[j].grid(row=2, column=1, sticky=W)
     else:
-        tButtonL = Radiobutton(frameTerm[j], text="Блокирован", variable=termLockButtonV[j], \
-                              value='YES')
-        tButtonL.grid(row=1, column=1, sticky=W)
-        tButtonL = Radiobutton(frameTerm[j], text="Разблокирован", variable=termLockButtonV[j], \
-                              value='NO')
-        tButtonL.select()
-        tButtonL.grid(row=2, column=1, sticky=W)
+        tButtonLY.append(Radiobutton(frameTerm[j], text="Блокирован", variable=termLockButtonV[j], \
+                              value='YES'))
+        tButtonLY[j].grid(row=1, column=1, sticky=W)
+        tButtonLN.append(Radiobutton(frameTerm[j], text="Разблокирован", variable=termLockButtonV[j], \
+                              value='NO'))
+        tButtonLN[j].select()
+        tButtonLN[j].grid(row=2, column=1, sticky=W)
 
     termMListLabel.append(Label(frameTerm[j], text="Выбор меню", fg=fgLock, bg=bgLock, font='arial 10'))
     termMListLabel[j].grid(row=1, column=2, columnspan=3)

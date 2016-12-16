@@ -22,6 +22,7 @@ statusFontColor = dict()
 lockLive = dict()
 lockStatus = dict()
 labelLock = []
+lockNumber = dict()
 labelStatusLock = []
 termLive = dict()
 termHack = dict()
@@ -277,6 +278,21 @@ def on_message(client, userdata, msg):
                             [commList[2].decode('utf-8'), commList[0]])
                 conn.commit()
                 conn.close()
+        elif commList[1] == 'DOLEVELDOWN':
+            tmpStatus = indexStatus[currentBaseStatus]
+            listStatus.select_clear(tmpStatus)
+            if tmpStatus == 4 or tmpStatus == 5:
+                listStatus.select_set(tmpStatus - 1)
+                client.publish('TERM',commList[0] + "/ISLEVEL/YES")
+                changeStatus()
+        elif commList[1] == 'DOLOCKOPEN':
+            client.publish('TERM', commList[0] + "/ISLOCK/YES")
+            conn = sqlite3.connect(dbName)
+            req = conn.cursor()
+            req.execute("SELECT Id_lock FROM term WHERE Id == ?",[commList[0]])
+            S = req.fetchone()
+            conn.close()
+            openLock(lockNumber[S[0]],S[0])
 
 client_time = millis()
 
@@ -358,7 +374,7 @@ for i in sorted(lockLive.keys()):
     frameLock.append(Frame(lockFrame,bd=2))
     labelLock.append(Label(frameLock[j], text=i, fg=fgLock, bg=bgLock, font='arial 13'))
     labelLock[j].grid(row=0, column=0, columnspan=2)
-
+    lockNumber[i] = j
     if lockStatus[i] == 'OPEN':
         buttonOpenLock.append(Button(frameLock[j],image=imgClose,width=35,height=35,\
                                      command=lambda num=j,ip=i:closeLock(num,ip)))
@@ -373,6 +389,7 @@ for i in sorted(lockLive.keys()):
     buttonOpenLock[j].grid(row=1, column=0)
     buttonBlockLock[j].grid(row=1, column=1)
     frameLock[j].grid(row=0,column=j)
+    lockNumber[i] = j
     j += 1
 lockFrame.grid(row=1,column=0)
 

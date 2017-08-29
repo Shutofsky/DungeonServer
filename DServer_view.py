@@ -15,12 +15,9 @@ dbName = 'DungeonStatus.db'
 
 baseStatusChg = 0
 lockStatusChg = dict()
-termStatusChg = dict()
 
 termHackAct = dict()
 termLockAct = dict()
-termOperAct = dict()
-termResultAct = dict()
 termMenuAct = dict()
 termMsgHeadAct = dict()
 termMsgBodyAct = dict()
@@ -59,14 +56,10 @@ termMListBT = []
 termMHead = []
 termMBody = []
 termMBodyScr = []
-#termAttempts = dict()
-#termDifficulty = dict()
 termOper = dict()
-termResult = dict()
 termMenu = dict()
 termMsgHead = dict()
 termMsgBody = dict()
-termDBUpdate = dict()
 frameTerm = []
 labelTerm = []
 frameLock = []
@@ -114,12 +107,9 @@ def getDBData():
         termHack[row[0]] = row[2]
         termLock[row[0]] = row[3]
         termOper[row[0]] = row[4]
-        termResult[row[0]] = row[5]
-        termMenu[row[0]] = row[6]
-        termMsgHead[row[0]] = row[8]
-        termMsgBody[row[0]] = row[9]
-        termDBUpdate[row[0]] = 0
-        termStatusChg[row[0]] = 0
+        termMenu[row[0]] = row[5]
+        termMsgHead[row[0]] = row[7]
+        termMsgBody[row[0]] = row[8]
     conn.close()
 
 def changeBaseStatusRequest():
@@ -224,7 +214,6 @@ def blockLockConfirm(num, ipAddress):
     lockStatusChg[ipAddress] = 0
 
 def terminalUpdateRequest(num,ipAddress):
-    global termStatusChg
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
     sTmp = termMBody[num].get(1.0, END)
@@ -266,14 +255,18 @@ def scanDBChanges():
     for row in req.execute("SELECT * from term_action ORDER BY Id"):
         termHackAct[row[0]] = row[1]
         termLockAct[row[0]] = row[2]
-        termOperAct[row[0]] = row[3]
-        termResultAct[row[0]] = row[4]
-        termMenuAct[row[0]] = row[5]
-        termMsgHeadAct[row[0]] = row[6]
-        termMsgBodyAct[row[0]] = row[7]
+        termMenuAct[row[0]] = row[3]
+        termMsgHeadAct[row[0]] = row[5]
+        termMsgBodyAct[row[0]] = row[6]
     for row in req.execute("SELECT * from term_status ORDER BY Id"):
         j = termNumber[row[0]]
         termLive[row[0]] = row[1]
+        if row[1] == 'NO':
+            bg = 'red'
+        else:
+            bg = 'green'
+        labelTerm[j]['bg'] = bg
+        termMListLabel[j]['bg'] = bg
         if row[4] == "UPDATE" :
             if row[2] == termHackAct[row[0]] :
                 termHack[row[0]] = row[2]
@@ -287,8 +280,7 @@ def scanDBChanges():
                     tButtonLY[j].select()
                 else:
                     tButtonLN[j].select()
-            termOper[row[0]] = row[4]
-            termResult[row[0]] = row[5]
+#            termOper[row[0]] = row[4]
             req.execute("UPDATE term_status SET Operation = '' WHERE Id == ?", [row[0]])
             conn.commit()
     conn.close()

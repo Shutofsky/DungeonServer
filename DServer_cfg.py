@@ -14,36 +14,64 @@ mqtt_broker_ip = '10.23.192.193'
 mqtt_broker_port = 1883
 mqttFlag = 0
 
-termWindow = []
+numTerms = 0
+
+termWindow = dict()
 termWindowConf = dict()
 termWindowConfOpen = dict()
-menuFrame = []
-menuLabel = []
-bodyFrame = []
-bodyLabel = []
-bodyHeadFrame = []
-bodyHead = []
-bodyText = []
-bodyScroll = []
-termButton = []
-numTerms = 0
-termMListBL = []
-termMListBA = []
-termMListBT = []
-termMListButtonLock = []
-termMListButtonAlert = []
-termMListButtonText = []
+termWinMenuFrame = dict()
+termWinMenuLabel = dict()
+termWinBodyFrame = dict()
+termWinBodyLabel = dict()
+termWinBodyHeadFrame = dict()
+termWinBodyHead = dict()
+termWinBodyText = dict()
+termWinBodyScroll = dict()
+termWinButton = dict()
+termWinMListBL = dict()
+termWinMListBA = dict()
+termWinMListBT = dict()
+termWinMListButtonLock = dict()
+termWinMListButtonAlert = dict()
+termWinMListButtonText = dict()
+termWinLockFrame = dict()
+termWinLockLabel = dict()
+termWinLockName = dict()
+
+# JSON представление терминалов
+# {"Имя терминала 1":{"IPAddr":"ИП адрес терминала 1","isPowerOn":"True", "isLocked":"False",
+#                     "isHacked":"False", "isLockOpen":"False", "isLevelDown":"False",
+#                     "attempts":4, "wordLength":8, "wordsPrinted":10,
+#                     "menuList":"1,2,3", "msgHead":"Заголовок текста",
+#                     "msgBody":"Большой и длинный текст"},
+# "Имя терминала 2":{"IPAddr":"ИП адрес терминала 2","isPowerOn":"True", "isLocked":"False",
+#                     "isHacked":"False", "isLockOpen":"False", "isLevelDown":"False",
+#                     "attempts":4, "wordLength":8, "wordsPrinted":10,
+#                     "menuList":"1,2,3", "msgHead":"Заголовок текста",
+#                     "msgBody":"Большой и длинный текст"}}
+#
+termData = dict()
+
+# JSON представление замков
+# {"Имя замка 1":{"IPAddr":"ИП адрес замка 1","isSound":"True", "lockState":"closed",
+#                     "baseState":"blue", codes:{"Номер карты или код 1":["blue","green","yellow"],
+#                                                "Номер карты или код 2":["blue","green","yellow"]}},
+#  "Имя замка 2":{"IPAddr":"ИП адрес замка 2","isSound":"True", "lockState":"closed",
+#                     "baseState":"blue", codes:{"Номер карты или код 1":["blue","green","yellow"],
+#                                                "Номер карты или код 2":["blue","green","yellow"]}}}
+lockData = dict()
+
 
 start_time = datetime.now()
+
 def millis():
     dt = datetime.now() - start_time
     ms = (dt.days * 24 * 60 * 60 + dt.seconds) * 1000 + dt.microseconds / 1000.0
     return ms
 
-def terminalUpdateRequest(num,id):
-    print (num)
+def terminalUpdateRequest(id):
     print (id)
-    termButton[num].config(state=DISABLED)
+    termWinButton[id].config(state=DISABLED)
 
 def confirmClose(winID):
     winID.destroy()
@@ -99,14 +127,11 @@ def dbResetOperConfirm():
     confirmNo.grid(row=1, column=1)
 
 def closeAllTermWin():
-    global numTerms
     global termWindow
     i = 0
-    while i < numTerms:
+    for i in termWindow.keys():
         confirmClose(termWindow[i])
         print (i)
-        i += 1
-    numTerms = 0
 
 def termWindowConfInit(IPAddr):
     termWindowConfOpen[IPAddr] = 1
@@ -122,15 +147,93 @@ def termWindowConfInit(IPAddr):
     termConfEntry.grid(row=0, column=1)
     termConfButton.grid(row=1, column=0, columnspan=2)
 
-
 def termWindowConfClose(IPAddr, termName):
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
-    req.execute("INSERT INTO IP_Id values(?,?,'TERM')",[IPAddr,termName.get()])
+    req.execute("INSERT INTO IP_Id values(?,?,'TERM')", [IPAddr, termName.get()])
     conn.commit()
+    req.execute("SELECT Id, Alive, Hack_Status, Lock_Status, Operation, \
+                                Menulist, Id_lock, Msg_head, Msg_body \
+                                from term_status, IP_Id \
+                                WHERE term_status.Id == IP_Id.IDObj \
+                                AND  Ip_ID.TypeOBJ == 'TERM' \
+                                AND  Ip_ID.IDObj == ? \
+                                ORDER BY term_status.Id", [termName.get()])
+    if (req.rowcount == -1):  # Объект не описан, надо запросить данные и сбросить терминал в нулевое состояние
+        client.publish('TERM', IPAddr + '/RESETDB')
+        time.sleep(1)
+        client.publish('TERM', IPAddr + '/GETDB')
+    else: # Объект описан, вкачиваем в него данные с базы сервера:
+        row = req.fetchone()
+        client.publish('TERM', IPAddr + '/RESETDB')
+        time.sleep(1)
+        client.publish('TERM', IPAddr + '/LOCK/' + row[3])
+        time.sleep(0.1)
+        client.publish('TERM', IPAddr + '/HACK/' + row[2])
+        time.sleep(0.1)
+        client.publish('TERM', IPAddr + '/MENULIST/' + row[5])
+        time.sleep(0.1)
+        client.publish('TERM', IPAddr + '/MAILHEAD/' + row[7])
+        time.sleep(0.1)
+        client.publish('TERM', IPAddr + '/MAILHEAD/' + row[8])
     conn.close()
     confirmClose(termWindowConf[IPAddr])
     termWindowConfOpen[IPAddr] = 0
+
+def termWindowOpen(id, mList, bHead, bText, idLock):
+    termWindow[id] = Toplevel()
+    termWindow[id].title(u'Терминал ' + id)
+    termWinMenuFrame[id] = Frame(termWindow[id])
+    termWinMenuLabel[id] = Label(termWinMenuFrame[id], text=u'Пункты меню: ')
+    termWinMenuLabel[id].grid(row=0, column=0, sticky=E)
+    termWinMListBL[id] = StringVar()
+    termWinMListBA[id] = StringVar()
+    termWinMListBT[id] = StringVar()
+    termWinMListButtonLock[id] = Checkbutton(termWinMenuFrame[id], text='Замок', \
+                                           variable=termWinMListBL[id], \
+                                           onvalue="1,", offvalue="")
+    termWinMListButtonAlert[id] = Checkbutton(termWinMenuFrame[id], text='Тревога', \
+                                            variable=termWinMListBA[id], \
+                                            onvalue="2,", offvalue="")
+    termWinMListButtonText[id] = Checkbutton(termWinMenuFrame[id], text='Текст', \
+                                           variable=termWinMListBT[id], \
+                                           onvalue="3,", offvalue="")
+    tmplist = mList.split(",")
+    if "1" in tmplist:
+        termWinMListButtonLock[id].select()
+    if "2" in tmplist:
+        termWinMListButtonAlert[id].select()
+    if "3" in tmplist:
+        termWinMListButtonText[id].select()
+    termWinMListButtonLock[id].grid(row=0, column=1, sticky=E)
+    termWinMListButtonAlert[id].grid(row=0, column=2, sticky=E)
+    termWinMListButtonText[id].grid(row=0, column=3, sticky=E)
+    termWinMenuFrame[id].grid(row=1, column=0, columnspan=4)
+    termWinLockFrame[id] = Frame(termWindow[id])
+    termWinLockLabel[id] = Label(termWinLockFrame[id], text=u'Имя связанного замка: ')
+    termWinLockName[id] = Entry(termWinLockFrame[id], width=50)
+    termWinLockName[id].insert(0, idLock)
+    termWinLockLabel[id].grid(row=0, column=0, sticky=W)
+    termWinLockName[id].grid(row=0, column=1, sticky=E)
+    termWinLockFrame[id].grid(row=2, column=0, columnspan=4)
+    termWinBodyHeadFrame[id] = Frame(termWindow[id])
+    termWinBodyLabel[id] = Label(termWinBodyHeadFrame[id], text=u'Заголовок: ')
+    termWinBodyLabel[id].grid(row=0, column=0, sticky=W)
+    termWinBodyHead[id] = Entry(termWinBodyHeadFrame[id], width=50)
+    termWinBodyHead[id].insert(0, bHead)
+    termWinBodyHead[id].grid(row=0, column=1, sticky=E)
+    termWinBodyHeadFrame[id].grid(row=3, column=0, columnspan=4)
+    termWinBodyFrame[id] = Frame(termWindow[id])
+    termWinBodyText[id] = Text(termWinBodyFrame[id], width=62, height=10, wrap=WORD, font='arial 8')
+    termWinBodyText[id].insert(END, bText)
+    termWinBodyText[id].grid(row=1, column=0, sticky=W)
+    termWinBodyScroll[id] = Scrollbar(termWinBodyFrame[id], command=termWinBodyText[id].yview)
+    termWinBodyScroll[id].grid(row=1, column=1, sticky=N + S)
+    termWinBodyFrame[id].grid(row=4, column=0, columnspan=4)
+    termWinButton[id] = Button(termWindow[id], text=u'Применить!', width=50, \
+                             command=lambda id=id: terminalUpdateRequest(id))
+    termWinButton[id].grid(row=5, column=0, columnspan=4)
+
 
 def readTermMenuText():
     global numTerms
@@ -144,68 +247,25 @@ def readTermMenuText():
                                 WHERE term_status.Id == IP_Id.IDObj AND \
                                 Ip_ID.TypeOBJ== 'TERM' \
                                 ORDER BY term_status.Id"):
-        termWindow.append(Toplevel())
-        headTitle = u'Терминал ' + row[0]
-        termWindow[i].title(headTitle)
-        menuFrame.append(Frame(termWindow[i]))
-        menuLabel.append(Label(menuFrame[i], text=u'Пункты меню: '))
-        menuLabel[i].grid(row=0, column=0, sticky=E)
-        termMListBL.append(StringVar())
-        termMListBA.append(StringVar())
-        termMListBT.append(StringVar())
-        termMListButtonLock.append(Checkbutton(menuFrame[i], text='Замок', \
-                                               variable=termMListBL[i], \
-                                               onvalue="1,", offvalue=""))
-        termMListButtonAlert.append(Checkbutton(menuFrame[i], text='Тревога', \
-                                                variable=termMListBA[i], \
-                                                onvalue="2,", offvalue=""))
-        termMListButtonText.append(Checkbutton(menuFrame[i], text='Текст', \
-                                               variable=termMListBT[i], \
-                                               onvalue="3,", offvalue=""))
-        tmplist = row[5].split(",")
-        if "1" in tmplist:
-            termMListButtonLock[i].select()
-        if "2" in tmplist:
-            termMListButtonAlert[i].select()
-        if "3" in tmplist:
-            termMListButtonText[i].select()
-        termMListButtonLock[i].grid(row=0, column=1, sticky=E)
-        termMListButtonAlert[i].grid(row=0, column=2, sticky=E)
-        termMListButtonText[i].grid(row=0, column=3, sticky=E)
-        menuFrame[i].grid(row=1, column=0, columnspan=4)
-
-        bodyHeadFrame.append(Frame(termWindow[i]))
-        bodyLabel.append(Label(bodyHeadFrame[i], text=u'Заголовок: '))
-        bodyLabel[i].grid(row=0, column=0, sticky=W)
-        bodyHead.append(Entry(bodyHeadFrame[i], width=50))
-        bodyHead[i].insert(0, row[7])
-        bodyHead[i].grid(row=0, column=1, sticky=E)
-        bodyHeadFrame[i].grid(row=2, column=0, columnspan=4)
-        bodyFrame.append(Frame(termWindow[i]))
-        bodyText.append(Text(bodyFrame[i], width=62, height=10, wrap=WORD, font='arial 8'))
-        bodyText[i].insert(END, row[8])
-        bodyText[i].grid(row=1,column=0, sticky=W)
-        bodyScroll.append(Scrollbar(bodyFrame[i], command=bodyText[i].yview))
-        bodyScroll[i].grid(row=1, column=1, sticky=N+S)
-        bodyFrame[i].grid(row=3, column=0, columnspan=4)
-        termButton.append(Button(termWindow[i], text=u'Применить!', width=50, \
-                                 command=lambda num=i, ip=row[0]: terminalUpdateRequest(num, ip)))
-        termButton[i].grid(row=4, column=0, columnspan=4)
-        i += 1
-    numTerms = i
-    print(numTerms)
+        termWindowOpen(row[0], row[5], row[7], row[8], row[6])
     conn.close()
+
+def configCompleteInit():
+    readTermMenuText()
 
 def confWindowsInit():
     root = Tk()
     root.title(u'Сброс базы сервера')
-    root.geometry('160x80')
+    root.geometry('240x80')
+    configComplete = Button(root, text='Завершить конфигурирование устройств!', \
+                      command=lambda : configCompleteInit())
     resetAll = Button(root, text='Сбросить всю базу!', \
                       command=lambda : dbResetAllConfirm())
     resetOper = Button(root, text='Сбросить оперативные данные!', \
                        command=lambda: dbResetOperConfirm())
-    resetAll.grid(row=0, column=0)
-    resetOper.grid(row=1, column=0)
+    configComplete.grid(row=0, column=0)
+    resetAll.grid(row=1, column=0)
+    resetOper.grid(row=2, column=0)
     readTermMenuText()
     root.mainloop()
 
@@ -250,7 +310,7 @@ def on_message(client, userdata, msg):
 	# Здесь должна быть обработка сообщений для канала RGBASK
 
 def mqttConnInit():
-    try:  # Продбуем соединиться с сервером
+    try:  # Пробуем соединиться с сервером
         client.connect(mqtt_broker_ip, mqtt_broker_port, 5)	# Соединяемся с сервtром. Адрес, порт, таймаут попытки.
     except BaseException:
         # Соединение не удалось!

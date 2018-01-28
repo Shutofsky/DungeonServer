@@ -11,7 +11,7 @@ import time
 import json
 
 dbName = 'DungeonStatus.db'
-mqtt_broker_ip = '10.23.192.193'
+mqtt_broker_ip = '192.168.0.103'
 mqtt_broker_port = 1883
 mqttFlag = False
 
@@ -30,6 +30,8 @@ lockData = dict()
 lockCode = dict()
 lockWinFrames =  dict()
 lockOrder = dict()
+lockIPtoName = dict()
+lockNewWin = dict()
 cardNames = dict()
 
 start_time = datetime.now()
@@ -105,6 +107,7 @@ def readLockData():
     global lockData
     global cardNames
     global lockOrder
+    global lockIPtoName
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
     reqCodes = conn.cursor()
@@ -112,11 +115,12 @@ def readLockData():
     for rowId in reqCardList.execute("SELECT * FROM cardList"):
         cardNames[rowId[0]] = rowId[1]
     jsStr = '{'
-    for row in req.execute("SELECT name, IPAddr, isSound, lockState, baseState, isAlive, aliveTimeStamp \
+    for row in req.execute("SELECT name, IPAddr, isSound, lockState, baseState \
                                 FROM lockStatus \
                                 ORDER BY name"):
         jsStr += '"'+row[0]+'":{"IPAddr":"'+row[1]+'","isSound":"'+row[2]+'","lockState":"'+row[3]+ \
-                 '","baseState":"'+row[4]+'","isAlive":"'+row[5]+'","aliveTimeStamp":'+str(row[6])+',"codes":{'
+                 '","baseState":"'+row[4]+'","isAlive":"False","aliveTimeStamp":0,"codes":{'
+        lockIPtoName[row[1]] = row[0]
         for rowCard in reqCodes.execute("SELECT cardNumber, stateList \
                                         FROM lockCodes \
                                         WHERE lockName = ?",[row[0]]):
@@ -132,23 +136,35 @@ def readLockData():
 def updateLockIP(name,newIP):
     global lockData
     global lockWinFrames
-    print (newIP.get())
+    global lockIPtoName
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
     req.execute("UPDATE lockStatus SET IPAddr = ? WHERE name = ?",[newIP.get(),name])
     conn.commit()
     conn.close()
+    del(lockIPtoName[lockData[name]['IPAddr']])
     lockData[name]['IPAddr']=newIP.get()
+    lockIPtoName[newIP.get()] = name
 
 def updateLockSound(name,newState):
     global lockData
     global lockWinFrames
+#    lockWinFrames[name]['butSoundOn'].config(state=DISABLED, bg='lightgray')
+#    lockWinFrames[name]['butSoundOff'].config(state=DISABLED, bg='lightgray')
     if newState == 'True':
         # MQTT sending here
+        client.publish('LOCK',lockWinFrames[name]['valIPAddr'].get() + \
+                       '/SOUND')
+        print (lockWinFrames[name]['valIPAddr'].get() + \
+                       '/SOUND')
         lockWinFrames[name]['butSoundOn'].config(state=DISABLED, bg='lightgreen')
         lockWinFrames[name]['butSoundOff'].config(state=NORMAL, bg='lightgray')
     else:
         # MQTT sending here
+        client.publish('LOCK',lockWinFrames[name]['valIPAddr'].get() + \
+                       '/NOSOUND')
+        print (lockWinFrames[name]['valIPAddr'].get() + \
+                       '/NOSOUND')
         lockWinFrames[name]['butSoundOn'].config(state=NORMAL, bg='lightgray')
         lockWinFrames[name]['butSoundOff'].config(state=DISABLED, bg='red')
     conn = sqlite3.connect(dbName)
@@ -161,20 +177,24 @@ def updateLockSound(name,newState):
 def updateLockState(name, newState):
     global lockData
     global lockWinFrames
+    ipAddr = lockData[name]['IPAddr']
     if newState == 'opened':
         # MQTT sending here
+        client.publish("LOCK", ipAddr + "/OPEN")
         lockWinFrames[name]['butOpen'].config(state=DISABLED)
-        lockWinFrames[name]['butClose'].config(state=NORMAL)
-        lockWinFrames[name]['butBlock'].config(state=NORMAL)
+        lockWinFrames[name]['butClose'].config(state=DISABLED)
+        lockWinFrames[name]['butBlock'].config(state=DISABLED)
     elif newState == 'closed':
         # MQTT sending here
-        lockWinFrames[name]['butOpen'].config(state=NORMAL)
+        client.publish("LOCK", ipAddr + "/CLOSE")
+        lockWinFrames[name]['butOpen'].config(state=DISABLED)
         lockWinFrames[name]['butClose'].config(state=DISABLED)
-        lockWinFrames[name]['butBlock'].config(state=NORMAL)
+        lockWinFrames[name]['butBlock'].config(state=DISABLED)
     else:
         # MQTT sending here
-        lockWinFrames[name]['butOpen'].config(state=NORMAL)
-        lockWinFrames[name]['butClose'].config(state=NORMAL)
+        client.publish("LOCK", ipAddr + "/BLOCK")
+        lockWinFrames[name]['butOpen'].config(state=DISABLED)
+        lockWinFrames[name]['butClose'].config(state=DISABLED)
         lockWinFrames[name]['butBlock'].config(state=DISABLED)
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
@@ -183,23 +203,22 @@ def updateLockState(name, newState):
     conn.close()
     lockData[name]['lockState']=newState
 
-
 def updateLockCard(name,card,color,mode):
     global lockData
     global baseColors
-#    print ("Entering color work: LockName="+name+" CardNum="+card+" Color="+color+" mode="+mode.get())
+    IPAddr = lockData[name]['IPAddr']
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
     if card not in lockData[name]['codes'].keys():
         # MQTT sending here
-#        print ("Not in keys card="+card)
+        client.publish("LOCK", IPAddr + "/ADDID/"+card+"/"+color)
         req.execute("INSERT INTO lockCodes VALUES(?,?,?)", [name, card, color])
-        lockData[name]['codes'][card].append(str(color))
+        lockData[name]['codes'][card] = [color]
         conn.commit()
+        conn.close()
         return()
     else:
         colorList = list(lockData[name]['codes'][card])
-#        print (lockData[name]['codes'][card])
         newColorList = []
         if mode.get() == 'True':
             colorList.append(color)
@@ -209,23 +228,54 @@ def updateLockCard(name,card,color,mode):
             newColorList.append(col.strip())
         if len(newColorList) == 0:
             # MQTT sending here
+            client.publish("LOCK", IPAddr + "/DELID/" + card)
             req.execute("DELETE FROM lockCodes WHERE lockName = ? AND cardNumber = ?", \
                         [name, card])
             conn.commit()
             del(lockData[name]['codes'][card])
-#            print("DELETE")
             return()
         addColorList = []
         for numColor in baseColors.keys():
             if baseColors[numColor][0] in newColorList:
                 addColorList.append(str(baseColors[numColor][0]))
+        # MQTT sending here
+        client.publish("LOCK", IPAddr + "/CHGID/" + card + "/" + ','.join(addColorList))
         req.execute("UPDATE lockCodes SET stateList = ? WHERE lockName = ? AND cardNumber = ?", \
                     [','.join(addColorList), name, card])
         lockData[name]['codes'][card] = addColorList
         conn.commit()
-    # MQTT sending here
     conn.close()
 
+def bindLockIP(name, addr):
+    lockWinFrames[lockOrder[name.curselection()[0]]]['valIPAddr'].delete(0, END)
+    lockWinFrames[lockOrder[name.curselection()[0]]]['valIPAddr'].insert(0, addr)
+    updateLockIP(lockOrder[name.curselection()[0]],lockWinFrames[lockOrder[name.curselection()[0]]]['valIPAddr'])
+    newLockWindow.destroy()
+    del(lockNewWin[addr])
+
+def newLockWinCreate(IPAddr):
+    global newLockWindow
+    newLockWindow = Toplevel()
+    lockNewWin[IPAddr] = dict()
+    lockNewWin[IPAddr]['labMain'] = Label(newLockWindow, text = 'Обнаружен новый замок с адресом: '+IPAddr)
+    lockNewWin[IPAddr]['listMainFrame'] = Frame(newLockWindow)
+    lockNewWin[IPAddr]['newNameListScroll'] = Scrollbar(lockNewWin[IPAddr]['listMainFrame'], orient=VERTICAL)
+    lockNewWin[IPAddr]['newNameList'] = Listbox(lockNewWin[IPAddr]['listMainFrame'], width=40, \
+                                                height=3, selectmode = SINGLE, exportselection=0, \
+                                                yscrollcommand = lockNewWin[IPAddr]['newNameListScroll'].set)
+    lockNewWin[IPAddr]['newNameList'].delete(0, END)
+    for lockNum in lockOrder.keys():
+        lockNewWin[IPAddr]['newNameList'].insert(END, lockOrder[lockNum])
+    lockNewWin[IPAddr]['newNameListScroll'].config(command=lockNewWin[IPAddr]['newNameList'].yview)
+    lockNewWin[IPAddr]['newNameBut'] = Button(newLockWindow, text = u'Назначить имя из списка', \
+            command = lambda \
+            lockName = lockNewWin[IPAddr]['newNameList'], \
+            lockAddr = IPAddr : bindLockIP(lockName, lockAddr))
+    lockNewWin[IPAddr]['labMain'].grid(row = 0, column = 0)
+    lockNewWin[IPAddr]['newNameList'].grid(row = 1, column = 0)
+    lockNewWin[IPAddr]['newNameListScroll'].grid(row = 1, column = 1, sticky = W)
+    lockNewWin[IPAddr]['newNameBut'].grid(row = 1, column = 2)
+    lockNewWin[IPAddr]['listMainFrame'].grid(row = 1, column = 0)
 
 def createLocksWindow():
     global lockData
@@ -241,7 +291,14 @@ def createLocksWindow():
         lockWinFrames[lockName]['mainLockFrame'] = Frame(allLockWindow, bd = 3, relief = SUNKEN)
         lockWinFrames[lockName]['labLockName'] = Label(lockWinFrames[lockName]['mainLockFrame'],\
                                                          text = lockName, font = (("Arial", 12, "bold")))
-        lockWinFrames[lockName]['labLockName'].grid(row = 0, column = 0, columnspan = 3, sticky = W+E)
+        lockWinFrames[lockName]['labLockName'].grid(row = 0, column = 0, columnspan = 2, sticky = W)
+        if lockData[lockName]['isAlive'] == 'True':
+            bgAlive = "green"
+        else:
+            bgAlive = "red"
+        lockWinFrames[lockName]['labLockLive'] = Button(lockWinFrames[lockName]['mainLockFrame'], \
+                                                        bg = bgAlive, state = DISABLED, text=u'    ')
+        lockWinFrames[lockName]['labLockLive'].grid(row = 0, column = 2, sticky = E)
         lockWinFrames[lockName]['labIPAddr'] = Label(lockWinFrames[lockName]['mainLockFrame'], text=u'IP адрес: ')
         lockWinFrames[lockName]['labIPAddr'].grid(row = 1, column = 0, sticky = W)
         lockWinFrames[lockName]['valIPAddr'] = Entry(lockWinFrames[lockName]['mainLockFrame'], width = 16)
@@ -258,7 +315,6 @@ def createLocksWindow():
                                                        text=u'Вкл', command=lambda name=lockName, state='True': \
                                                        updateLockSound(name, state))
         lockWinFrames[lockName]['butSoundOn'].grid(row=2, column=1)
-
         lockWinFrames[lockName]['butSoundOff'] = Button(lockWinFrames[lockName]['mainLockFrame'], \
                                                         text=u'Выкл', command=lambda name=lockName, state='False': \
                                                         updateLockSound(name, state))
@@ -286,16 +342,22 @@ def createLocksWindow():
                                                          updateLockState(name, state))
         lockWinFrames[lockName]['butBlock'].grid(row=3, column=2)
         if lockData[lockName]['lockState'] == 'opened':
-            lockWinFrames[lockName]['butOpen'].config(state=DISABLED)
-            lockWinFrames[lockName]['butClose'].config(state=NORMAL)
-            lockWinFrames[lockName]['butBlock'].config(state=NORMAL)
+            lockWinFrames[lockName]['butOpen'].config(state=DISABLED,bg="lightgreen")
+            lockWinFrames[lockName]['butClose'].config(state=NORMAL,bg="lightgray")
+            lockWinFrames[lockName]['butBlock'].config(state=NORMAL,bg="lightgray")
         elif lockData[lockName]['lockState'] == 'closed':
-            lockWinFrames[lockName]['butOpen'].config(state=NORMAL)
-            lockWinFrames[lockName]['butClose'].config(state=DISABLED)
-            lockWinFrames[lockName]['butBlock'].config(state=NORMAL)
+            lockWinFrames[lockName]['butOpen'].config(state=NORMAL,bg="lightgray")
+            lockWinFrames[lockName]['butClose'].config(state=DISABLED,bg="lightgreen")
+            lockWinFrames[lockName]['butBlock'].config(state=NORMAL,bg="lightgray")
         else:
-            lockWinFrames[lockName]['butOpen'].config(state=NORMAL)
-            lockWinFrames[lockName]['butClose'].config(state=NORMAL)
+            lockWinFrames[lockName]['butOpen'].config(state=NORMAL,bg="lightgray")
+            lockWinFrames[lockName]['butClose'].config(state=NORMAL,bg="lightgray")
+            lockWinFrames[lockName]['butBlock'].config(state=DISABLED,bg="lightgreen")
+        if lockData[lockName]['isAlive'] == 'False':
+            lockWinFrames[lockName]['butSoundOn'].config(state=DISABLED)
+            lockWinFrames[lockName]['butSoundOff'].config(state=DISABLED)
+            lockWinFrames[lockName]['butOpen'].config(state=DISABLED)
+            lockWinFrames[lockName]['butClose'].config(state=DISABLED)
             lockWinFrames[lockName]['butBlock'].config(state=DISABLED)
         lockWinFrames[lockName]['codeFrame'] = dict()
         lockWinFrames[lockName]['codeFrame']['frame'] = Frame(lockWinFrames[lockName]['mainLockFrame'], \
@@ -329,13 +391,13 @@ def createLocksWindow():
                 lockWinFrames[lockName]['codeFrame']['but' + idCode + baseColors[str(i)][0]].grid(row = rowColor, \
                                                                                                   column = i, \
                                                                                                   sticky = N)
+                if lockData[lockName]['isAlive'] == 'False':
+                    lockWinFrames[lockName]['codeFrame']['but' + idCode + baseColors[str(i)][0]].config(state=DISABLED)
                 i += 1
             rowColor += 1
         lockWinFrames[lockName]['codeFrame']['frame'].grid(row=4, columnspan = 3, sticky = W)
         lockWinFrames[lockName]['mainLockFrame'].grid(row = 0, column = colFrame, sticky = N+E)
         colFrame += 1
-
-
 
 def confWindowsInit():
     root = Tk()
@@ -354,15 +416,19 @@ def confWindowsInit():
     readLockData()
     createLocksWindow()
 #    readTermMenuText()
-#    readLockMenuText()
     root.mainloop()
 
 def onConnect(client, userdata, flags, rc):
     client.subscribe("TERMASK/#")    # Подписка на канал TERMASK
     client.subscribe("LOCKASK/#")    # Подписка на канал LOCKASK
     client.subscribe("RGBASK/#")     # Подписка на канал LOCKASK
+    print ("Connected to MQTT!")
 
 def onMessage(client, userdata, msg):
+    global lockData
+    global lockWinFrames
+    global lockIPtoName
+    global baseColors
     commList = msg.payload.decode('utf-8').split('/')  # Разделяем тело сообщения на элементы списка по знаку /
     # commList[0] - IP-адрес устройства, и т.д.
     if msg.topic == 'TERMASK':
@@ -391,40 +457,126 @@ def onMessage(client, userdata, msg):
         conn.close()
         # Здесь должна быть обработка сообщений для канала TERMASK
     elif msg.topic == 'LOCKASK':
-        print(msg.payload)
-	# Здесь должна быть обработка сообщений для канала LOCKASK
+        # Здесь должна быть обработка сообщений для канала LOCKASK
+        if commList[0] not in lockIPtoName.keys():
+            # Стукнулось неизвестное устройтство  - замок
+            print (lockNewWin.keys())
+            if commList[0] not in lockNewWin.keys():
+                # Окно для этого устройства ещё не создано
+                newLockWinCreate(commList[0])
+        else:
+            lockName = lockIPtoName[commList[0]]
+            if commList[1] == 'PONG':
+                lockData[lockName]['aliveTimeStamp'] = millis()
+                if lockData[lockName]['isAlive'] == "False":
+                    client.publish("LOCK",commList[0]+"/DELALLID")
+                    for idCode in lockData[lockName]['codes'].keys():
+                        client.publish("LOCK", commList[0] + "/ADDID/"+idCode+"/"+ \
+                                               ','.join(lockData[lockName]['codes'][idCode]))
+                    jsStr = '{'
+                    for parName in lockData[lockName].keys():
+                        if parName != 'codes' and parName != 'isAlive' \
+                                and parName != 'aliveTimeStamp' and parName!='IPAddr':
+                            jsStr += '"'+parName+'":"'+lockData[lockName][parName]+'",'
+                    jsStr = jsStr.rstrip(',') + "}"
+                    client.publish("LOCK",commList[0]+"/SETPARMS/"+jsStr)
+                    lockData[lockName]['isAlive'] = "True"
+                    lockWinFrames[lockName]['labLockLive'].config(bg="green")
+                    if lockData[lockName]['isSound'] == 'True':
+                        lockWinFrames[lockName]['butSoundOn'].config(state=DISABLED)
+                        lockWinFrames[lockName]['butSoundOff'].config(state=NORMAL)
+                    else:
+                        lockWinFrames[lockName]['butSoundOn'].config(state=NORMAL)
+                        lockWinFrames[lockName]['butSoundOff'].config(state=DISABLED)
+                    if lockData[lockName]['lockState'] == 'closed':
+                        lockWinFrames[lockName]['butOpen'].config(state=NORMAL,bg="lightgray")
+                        lockWinFrames[lockName]['butClose'].config(state=DISABLED,bg="lightgreen")
+                        lockWinFrames[lockName]['butBlock'].config(state=NORMAL,bg="lightgray")
+                    elif lockData[lockName]['lockState'] == 'opened':
+                        lockWinFrames[lockName]['butOpen'].config(state=DISABLED,bg="lightgreen")
+                        lockWinFrames[lockName]['butClose'].config(state=NORMAL,bg="lightgray")
+                        lockWinFrames[lockName]['butBlock'].config(state=NORMAL,bg="lightgray")
+                    else:
+                        lockWinFrames[lockName]['butOpen'].config(state=DISABLED,bg="lightgreen")
+                        lockWinFrames[lockName]['butClose'].config(state=NORMAL,bg="lightgray")
+                        lockWinFrames[lockName]['butBlock'].config(state=NORMAL,bg="lightgray")
+                    for idBStr in lockWinFrames[lockName]['codeFrame'].keys():
+                        if idBStr.find("but") != -1:
+                            lockWinFrames[lockName]['codeFrame'][idBStr].config(state=NORMAL)
+            elif commList[1] == 'SOUND':
+                print(".")
+            elif commList[1] == 'OPENED':
+                lockWinFrames[lockName]['butOpen'].config(state=DISABLED,bg="lightgreen")
+                lockWinFrames[lockName]['butClose'].config(state=NORMAL,bg="lightgray")
+                lockWinFrames[lockName]['butBlock'].config(state=NORMAL,bg="lightgray")
+            elif commList[1] == 'CLOSED':
+                lockWinFrames[lockName]['butOpen'].config(state=NORMAL,bg="lightgray")
+                lockWinFrames[lockName]['butClose'].config(state=DISABLED,bg="lightgreen")
+                lockWinFrames[lockName]['butBlock'].config(state=NORMAL,bg="lightgray")
+            elif commList[1] == 'BLOCKED':
+                lockWinFrames[lockName]['butOpen'].config(state=NORMAL,bg="lightgray")
+                lockWinFrames[lockName]['butClose'].config(state=NORMAL,bg="lightgray")
+                lockWinFrames[lockName]['butBlock'].config(state=DISABLED,bg="lightgreen")
     elif msg.topic == 'RGBASK':
         print(msg.payload)
 	# Здесь должна быть обработка сообщений для канала RGBASK
 
 def mqttConnInit():
     try:  # Пробуем соединиться с сервером
-        client.connect(mqtt_broker_ip, mqtt_broker_port, 5)	# Соединяемся с сервtром. Адрес, порт, таймаут попытки.
+        client.connect(mqtt_broker_ip, mqtt_broker_port, 5)  # Соединяемся с сервtром. Адрес, порт, таймаут попытки.
     except BaseException:
         # Соединение не удалось!
         mqttFlag = False
     else:
         # Соединение успешно.
         mqttFlag = True
-        client.loop_start() # Клиентский цикл запустили - реконнект при разрыв связи и работа обработчика сообщений
+        client.loop_start()  # Клиентский цикл запустили - реконнект при разрыв связи и работа обработчика сообщений
     while mqttFlag :
         client.publish('TERM', "*/PING") # Запрос PING для всех терминалов (канал TERM)
         client.publish('LOCK', "*/PING") # Запрос PING для всех замков (канал LOCK)
         client.publish('RGB', "*/PING")  # Запрос PING для всех светильников (канал RGB)
         time.sleep(1) # Пауза одна секунда
 
+def checkAliveTime():
+    global lockData
+    global lockWinFrames
+    aliveDelta = 1500
+    while True:
+        curTime = millis()
+        for lockName in lockData.keys():
+            if curTime > (lockData[lockName]['aliveTimeStamp'] + aliveDelta) \
+                    and lockData[lockName]['isAlive'] == "True":
+                lockData[lockName]['isAlive'] = "False"
+                lockWinFrames[lockName]['labLockLive'].config(bg="red")
+                lockWinFrames[lockName]['butSoundOn'].config(state=DISABLED)
+                lockWinFrames[lockName]['butSoundOff'].config(state=DISABLED)
+                lockWinFrames[lockName]['butOpen'].config(state=DISABLED)
+                lockWinFrames[lockName]['butClose'].config(state=DISABLED)
+                lockWinFrames[lockName]['butBlock'].config(state=DISABLED)
+                for idBStr in lockWinFrames[lockName]['codeFrame'].keys():
+                    if idBStr.find("but") != -1:
+                        lockWinFrames[lockName]['codeFrame'][idBStr].config(state=DISABLED)
+        time.sleep(0.5)
+#        print (curTime)
 
 
-#client = mqtt.Client()   	# Создаём объект типа MQTT Client
-#client.on_connect = onConnect	# Привязываем функцию для исполнения при успешном соединении с сервером
-#client.on_message = onMessage	# Привязываем функцию для исполнения при приходе сообщения в любом из подписанных каналов
+client = mqtt.Client()  # Создаём объект типа MQTT Client
+client.on_connect = onConnect  # Привязываем функцию для исполнения при успешном соединении с сервером
+client.on_message = onMessage  # Привязываем функцию для исполнения при приходе сообщения в любом из подписанных каналов
+
+
 
 confWindows = threading.Thread(name='confWindows', \
                                target=confWindowsInit)
 
-#mqttConn = threading.Thread(name='mqttConn', \
-#                               target=mqttConnInit)
+mqttConn = threading.Thread(name='mqttConn', \
+                               target=mqttConnInit)
 
-#mqttConn.start()
+checkAlive = threading.Thread(name='checkAlive', \
+                               target=checkAliveTime)
+
+
+mqttConn.start()
 confWindows.start()
+checkAlive.start()
 

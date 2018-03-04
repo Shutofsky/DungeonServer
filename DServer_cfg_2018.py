@@ -46,6 +46,10 @@ baseData = dict()
 baseCommand = dict()
 baseWinFrame = dict()
 
+rgbData = dict()
+
+logStrCnt = 0
+
 start_time = datetime.now()
 
 def millis():
@@ -72,10 +76,10 @@ def readBaseData():
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
     for row in req.execute("SELECT colorStatus, alarmLevel \
-                                    FROM baseStatus"):
+                                     FROM baseStatus"):
         jsStr += '"colorStatus":"' + row[0] + '","alarmLevel":"' + str(row[1]) + '",'
     jsStr = jsStr.rstrip(',') + '}'
-    baseData =json.loads(jsStr)
+    baseData = json.loads(jsStr)
     jsStr = '{'
     req = conn.cursor()
     for row in req.execute("SELECT * \
@@ -88,6 +92,19 @@ def readBaseData():
     jsStr = jsStr.rstrip(',') + '}'
     print (jsStr)
     baseCommand = json.loads(jsStr)
+    conn.close()
+
+def readRGBData():
+    global rgbData
+    jsStr = '{'
+    conn = sqlite3.connect(dbName)
+    req = conn.cursor()
+    for row in req.execute("SELECT rgbName, rgbIPAddr \
+                                     FROM rgbStatus"):
+        rgbData[row[0]] = dict()
+        rgbData[row[0]]['IPAddr'] = row[1]
+        rgbData[row[0]]['isAlive'] = 'False'
+        rgbData[row[0]]['aliveTimeStamp'] = 0
     conn.close()
 
 def readLockData():
@@ -162,8 +179,6 @@ def updateLockIP(name,newIP):
 def updateLockSound(name,newState):
     global lockData
     global lockWinFrames
-#    lockWinFrames[name]['butSoundOn'].config(state=DISABLED, bg='lightgray')
-#    lockWinFrames[name]['butSoundOff'].config(state=DISABLED, bg='lightgray')
     if newState == 'True':
         # MQTT sending here
         client.publish('LOCK',lockWinFrames[name]['valIPAddr'].get() + \
@@ -682,9 +697,17 @@ def createTermWindow(termName, colFrame):
 def addTextLog(logString):
     global logWin
     global logBody
+    global logStrCnt
     dt = datetime.now()
     logBody.config(state=NORMAL)
     logBody.insert(END, dt.strftime("%d %b %y %H:%M:%S") + ' : ' + logString)
+    logStrCnt = len(logBody.get(1.0,END).split('\n'))
+    if logStrCnt>=32:
+        logStr = logBody.get(2.0, 30.0)
+        logStr.strip('\n')
+        logStr.strip('\r')
+        logBody.delete(1.0,END)
+        logBody.insert(1.0, logStr)
     logBody.config(state=DISABLED)
 
 def onConnect(client, userdata, flags, rc):
@@ -876,7 +899,26 @@ def onMessage(client, userdata, msg):
                 conn.close()
     elif msg.topic == 'RGBASK':
         # Здесь должна быть обработка сообщений для канала RGBASK
-        print(msg.payload)
+        # print(msg.payload)
+        if commList[0] not in rgbData.keys():
+            # Стукнулось неизвестное устройтство  - светильник
+            rgbData[commList[0]] = dict()
+            rgbData[commList[0]]['IPAddr'] = commList[0]
+            rgbData[commList[0]]['isAlive'] = 'False'
+            rgbData[commList[0]]['aliveTimeStamp'] = 0
+            conn = sqlite3.connect(dbName)
+            req = conn.cursor()
+            req.execute("INSERT INTO rgbStatus VALUES(?, ?)", [commList[0], commList[0]])
+            conn.commit()
+            conn.close()
+        else:
+            if commList[1] == 'PONG':
+                rgbData[commList[0]]['aliveTimeStamp'] = millis()
+                if rgbData[commList[0]]['isAlive'] == 'False':
+                    rgbData[commList[0]]['isAlive'] = 'True'
+                    for commStr in baseCommand[baseData['colorStatus']]['rgbCommand']:
+                        client.publish('RGB', commList[0] + commStr)
+                        time.sleep(0.1)
     elif msg.topic == 'PWRASK':
         print(msg.payload)
 	    # Здесь должна быть обработка сообщений для канала PWRASK
@@ -948,6 +990,10 @@ def checkAliveTime():
                 termWinFrames[termName]['butLockOpen'].config(state=DISABLED)
                 termWinFrames[termName]['butLevelDown'].config(state=DISABLED)
                 termWinFrames[termName]['msgBut'].config(state=DISABLED)
+        for rgbName in rgbData.keys():
+            if curTime > (rgbData[rgbName]['aliveTimeStamp'] + aliveDelta) \
+                    and rgbData[rgbName]['isAlive'] == "True":
+                rgbData[rgbName]['isAlive'] = 'False'
         time.sleep(1)
 #        print (curTime)
 
@@ -991,6 +1037,27 @@ def changeAlarmLevel(delta):
     curLevel+=delta
     baseWinFrame['alarmLevel'].delete(0, END)
     baseWinFrame['alarmLevel'].insert(0, str(curLevel))
+    if curLevel>=50 and curLevel<100:
+        # Смена статуса на жёлтый
+        if baseData['colorStatus'] == 'green':
+            logStr = 'Повышение уровня тревоги на ЖЁЛТЫЙ из-за активности на базе!!!\n'
+            addTextLog(logStr)
+            baseWinFrame['statusList'].selection_clear(3)
+            baseWinFrame['statusList'].selection_set(4)
+            changeBaseStatus(baseWinFrame['statusList'])
+    elif curLevel>=100:
+        if baseData['colorStatus'] == 'green':
+            logStr = 'Повышение уровня тревоги на КРАСНЫЙ из-за активности на базе!!!\n'
+            addTextLog(logStr)
+            baseWinFrame['statusList'].selection_clear(3)
+            baseWinFrame['statusList'].selection_set(5)
+            changeBaseStatus(baseWinFrame['statusList'])
+        elif baseData['colorStatus'] == 'yellow':
+            logStr = 'Повышение уровня тревоги на КРАСНЫЙ из-за активности на базе!!!\n'
+            addTextLog(logStr)
+            baseWinFrame['statusList'].selection_clear(4)
+            baseWinFrame['statusList'].selection_set(5)
+            changeBaseStatus(baseWinFrame['statusList'])
 
 def createBaseWindow():
     global baseWinFrame
@@ -1055,6 +1122,7 @@ def confWindowsInit():
     readLockData()
     readTermData()
     readBaseData()
+    readRGBData()
     createBaseWindow()
     createLocksWindow()
     createTermsWindow()

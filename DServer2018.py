@@ -99,48 +99,38 @@ def lockExpand():
     sender = window.sender()
     lockNum = int(sender.objectName()[len(sender.objectName())-1])
     lockName = lockOrder[lockNum]
-    window.lockName_2.setText(lockName)
+    window.lockNameExpand.setText(lockName)
     window.entryIPAddrLock.setText(lockData[lockName]['IPAddr'])
-
-    print("Нажата")
-
+    window.scrollCodesBox = QtWidgets.QGroupBox('')
+    window.scrollCodesForm = QtWidgets.QVBoxLayout()
     for idCode in cardNames.keys():
         window.frame = QtWidgets.QFrame()
         window.frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
         window.frame.setFrameShadow(QtWidgets.QFrame.Raised)
-
-        window.frameLayout = QtWidgets.QVBoxLayout(window.frame)
-        window.frameLayout.setObjectName("frameCodesLayout"+idCode)
-        window.frameLayout.setSpacing(30)
-        # self.scrollCodesLayout.setGeometry(QtCore.QRect(0, 70, 352, 500))
-        window.frame.setLayout(window.frameLayout)
-        window.frameLayout.addWidget(window.frame)
-        # self.scrollAreaWidgetContents_2.setObjectName("scrollAreaWidgetContents_2")
-        # window.frame.setGeometry(QtCore.QRect(10, 10, 380, 80))
-        window.frame.setFixedHeight(30)
-        window.frame.setMaximumHeight(30)
+        window.frame.setGeometry(QtCore.QRect(10, 10, 351, 21))
+        window.frame.setFixedHeight(20)
+        window.frame.setMaximumHeight(20)
         window.labCardName = QtWidgets.QLabel(window.frame)
-        font = QtGui.QFont()
-        font.setPointSize(10)
-        font.setBold(True)
-        font.setWeight(75)
-        window.labCardName.setFont(font)
         window.labCardName.setText(str(cardNames[idCode]))
+        window.labCardName.setGeometry(QtCore.QRect(0, 0, 231, 21))
         window.labCardName.setObjectName("labCard_" + idCode)
-        window.frameLayout.addWidget(window.labCardName)
-        print(repr(idCode))
         i = 1
         while i<6:
             print(i)
             window.checkBox = QtWidgets.QCheckBox(window.frame)
-            # window.checkBox.setGeometry(QtCore.QRect(230+20*(i-1), 10, 16, 17))
+            window.checkBox.setGeometry(QtCore.QRect(230+19*i, 0, 17, 17))
             window.checkBox.setText("")
+            bgColor=baseColors[str(i)][0]
+            window.checkBox.setStyleSheet('background-color: ' + bgColor)
             window.checkBox.setObjectName("checkBox_"+str(i))
-            window.frameLayout.addWidget(window.checkBox)
             i = i + 1
         window.frame.setObjectName("frame_" + idCode)
-        window.scrollCodesLayout.addWidget(window.frame)
-        # window.scrollCodesLayout.addWidget(window.frameLayout)
+        window.scrollCodesForm.addWidget(window.frame)
+    window.scrollCodesBox.setLayout(window.scrollCodesForm)
+    window.scrollCodes.setWidget(window.scrollCodesBox)
+    window.scrollCodes.setWidgetResizable(True)
+
+
 
 
 def createLockFrame(lockNum,lockName):
@@ -151,15 +141,12 @@ def createLockFrame(lockNum,lockName):
     global lockFrames
     global window
 
-    print(lockName)
-
-    # window.frame = QtWidgets.QFrame(window.scrollAreaWidgetContents)
     window.frame = QtWidgets.QFrame()
     window.frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
     window.frame.setFrameShadow(QtWidgets.QFrame.Raised)
-    window.frame.setGeometry(QtCore.QRect(10, 10, 380, 80))
-    window.frame.setFixedHeight(80)
-    window.frame.setMaximumHeight(80)
+    window.frame.setGeometry(QtCore.QRect(10, 10, 380, 60))
+    window.frame.setFixedHeight(60)
+    window.frame.setMaximumHeight(60)
     window.lockName = QtWidgets.QLabel(window.frame)
     window.lockName.setText(lockName)
     font = QtGui.QFont()
@@ -167,28 +154,63 @@ def createLockFrame(lockNum,lockName):
     font.setBold(True)
     font.setWeight(75)
     window.lockName.setFont(font)
+    if lockData[lockName]['isAlive'] == 'True':
+        fgColor = 'green'
+    else:
+        fgColor = 'red'
+    palette = window.lockName.palette()
+    palette.setColor(palette.WindowText, QtGui.QColor(fgColor))
+    window.lockName.setPalette(palette)
     window.lockName.setObjectName(lockName)
+    if lockData[lockName]['lockState'] == 'opened':
+        stateText = 'Закрыть'
+        blockText = 'Заблокировать'
+        bgStateColor = '#FF8080'
+        bgBlockColor = 'lightgreen'
+    elif lockData[lockName]['lockState'] == 'closed':
+        stateText = 'Открыть'
+        blockText = 'Заблокировать'
+        bgStateColor = 'lightgreen'
+        bgBlockColor = 'lightgreen'
+    else:
+        stateText = 'Открыть'
+        blockText = 'Разблокировать'
+        bgStateColor = 'lightgreen'
+        bgBlockColor = '#F08080'
     window.butState = QtWidgets.QPushButton(window.frame)
     window.butState.setGeometry(QtCore.QRect(10, 20, 75, 31))
-    window.butState.setText("Открыть")
+    window.butState.setText(stateText)
+    window.butState.setStyleSheet("QPushButton:hover { background-color: " + bgStateColor + " }")
+    window.butState.setStyleSheet("QPushButton:!hover { background-color: " + bgStateColor + " }")
+    # Добавить коннект на обработку кнопки открыть/закрыть
     window.butState.setObjectName("butState"+str(lockNum))
     window.butBlock = QtWidgets.QPushButton(window.frame)
     window.butBlock.setGeometry(QtCore.QRect(90, 20, 101, 31))
-    window.butBlock.setText("Разблокировать")
+    window.butBlock.setText(blockText)
+    window.butBlock.setStyleSheet("QPushButton:hover { background-color: " + bgBlockColor + " }")
+    window.butBlock.setStyleSheet("QPushButton:!hover { background-color: " + bgBlockColor + " }")
+    # Добавить коннект на обработку кнопки блокировать/разблокировать
     window.butBlock.setObjectName("butBlock"+str(lockNum))
+    if lockData[lockName]['isSound'] == 'True':
+        soundText = 'Звук ВЫКЛ'
+        bgSoundColor = 'lightgreen'
+    else:
+        soundText = 'Звук ВКЛ'
+        bgSoundColor = '#FF8080'
     window.butSound = QtWidgets.QPushButton(window.frame)
     window.butSound.setGeometry(QtCore.QRect(200, 20, 71, 31))
-    window.butSound.setText("Звук ВЫКЛ")
+    window.butSound.setText(soundText)
+    window.butSound.setStyleSheet("QPushButton:hover { background-color: " + bgSoundColor + " }")
+    window.butSound.setStyleSheet("QPushButton:!hover { background-color: " + bgSoundColor + " }")
     window.butSound.setObjectName("butSound"+str(lockNum))
+    # Добавить коннект на обработку кнопки включения/выключения звука
     window.butExpand = QtWidgets.QPushButton(window.frame)
     window.butExpand.setGeometry(QtCore.QRect(280, 20, 71, 31))
     window.butExpand.setText("Подробнее")
     window.butExpand.clicked.connect(lockExpand)
     window.butExpand.setObjectName("butExpand"+str(lockNum))
     window.frame.setObjectName("frameLock" + str(lockNum))
-    window.scrollLocksLayout.addWidget(window.frame)
-
-    # lockFrames[lockName][lockName].setText(lockName)
+    window.scrollLocksForm.addWidget(window.frame)
 
 def changeBaseScore():
     global window
@@ -204,6 +226,7 @@ def alarmChanged(delta):
     #
     # Обработка изменения тревоги
     #
+
 
 def changeBaseStatus(colorIndex):
     global baseData
@@ -269,8 +292,15 @@ def main():
 
     # Выводим данные по замкам
 
-    #for lockNum in lockOrder.keys():
-    #    createLockFrame(lockNum,lockOrder[lockNum])
+    window.scrollLocksBox = QtWidgets.QGroupBox('')
+    window.scrollLocksForm = QtWidgets.QVBoxLayout()
+    for lockNum in lockOrder.keys():
+        createLockFrame(lockNum,lockOrder[lockNum])
+    window.scrollLocksBox.setLayout(window.scrollLocksForm)
+    window.scrollLocks.setWidget(window.scrollLocksBox)
+    window.scrollLocks.setWidgetResizable(True)
+
+
 
 
 

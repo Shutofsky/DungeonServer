@@ -20,6 +20,9 @@ mqttFlag = False
 
 dbName = 'DungeonStatus.db'
 
+# Время для обнаружения сбоя в устройстве
+aliveDelta = 3000
+
 # Описание рабочих структур данных
 
 alarmValue = 0
@@ -38,6 +41,8 @@ termData = dict()
 termOrder = dict()
 termIPtoName = dict()
 termNameToNum = dict()
+
+rgbData = dict()
 
 start_time = datetime.now()
 
@@ -119,6 +124,19 @@ def readBaseData():
                  termStr+',"rgbCommand":'+rgbStr+'},'
     jsStr = jsStr.rstrip(',') + '}'
     baseCommand = json.loads(jsStr)
+    conn.close()
+
+def readRGBData():
+    global rgbData
+    jsStr = '{'
+    conn = sqlite3.connect(dbName)
+    req = conn.cursor()
+    for row in req.execute("SELECT rgbName, rgbIPAddr \
+                                     FROM rgbStatus"):
+        rgbData[row[0]] = dict()
+        rgbData[row[0]]['IPAddr'] = row[1]
+        rgbData[row[0]]['isAlive'] = 'False'
+        rgbData[row[0]]['aliveTimeStamp'] = 0
     conn.close()
 
 def readLockData():
@@ -399,7 +417,6 @@ def termExpandParm():
     doc.setHtml(window.termNameExp.text())
     termName = doc.toPlainText()
     bName = sender.objectName()
-    print (bName, termName)
     if bName == 'termLockLink':
         parmName = 'lockName'
         parmValue = sender.currentText()
@@ -777,9 +794,68 @@ class ExampleApp(QtWidgets.QMainWindow):
         self.baseStatusList.activated.connect(self.baseStatusUserChanged)
         self.butIPAddrTerm.clicked.connect(termIPChange)
         self.butIPAddrLock.clicked.connect(lockIPChange)
-
     def baseStatusUserChanged(self, value):
         changeBaseStatus(value)
+
+class checkAliveThread(threading.Thread):
+    def __init__(self, name='checkAliveThread'):
+        self._stopevent = threading.Event( )
+        self._sleepperiod = 1.0
+        threading.Thread.__init__(self, name=name)
+    def run(self):
+        global aliveDelta
+        global lockData
+        global termData
+        global rgbData
+        global window
+        while not self._stopevent.isSet( ):
+            # Берём текущее время
+            curTime = millis()
+            # Перебираем замки по списку
+            for lockName in lockData.keys():
+                if curTime > (lockData[lockName]['aliveTimeStamp'] + aliveDelta) \
+                        and lockData[lockName]['isAlive'] == "True":
+                    # Замок был живым, стал мёртвым
+                    lockData[lockName]['isAlive'] = "False"
+                    # Помечаем неактивными его органы управления.
+                    # lockWinFrames[lockName]['labLockLive'].config(bg="red")
+                    # lockWinFrames[lockName]['butSoundOn'].config(state=DISABLED)
+                    # lockWinFrames[lockName]['butSoundOff'].config(state=DISABLED)
+                    # lockWinFrames[lockName]['butOpen'].config(state=DISABLED)
+                    # lockWinFrames[lockName]['butClose'].config(state=DISABLED)
+                    # lockWinFrames[lockName]['butBlock'].config(state=DISABLED)
+                    # for idBStr in lockWinFrames[lockName]['codeFrame'].keys():
+                    #     if idBStr.find("but") != -1:
+                    #         lockWinFrames[lockName]['codeFrame'][idBStr].config(state=DISABLED)
+            # Перебираем термианлы по списку
+            for termName in termData.keys():
+                if curTime > (termData[termName]['aliveTimeStamp'] + aliveDelta) \
+                        and termData[termName]['isAlive'] == "True":
+                    # Терминал был живым, стал мёртвым
+                    termData[termName]['isAlive'] = "False"
+                    # termWinFrames[termName]['labTermLive'].config(bg="red")
+                    # termWinFrames[termName]['butPowered'].config(state=DISABLED)
+                    # termWinFrames[termName]['butLocked'].config(state=DISABLED)
+                    # termWinFrames[termName]['butHacked'].config(state=DISABLED)
+                    # termWinFrames[termName]['butMenu1'].config(state=DISABLED)
+                    # termWinFrames[termName]['butMenu2'].config(state=DISABLED)
+                    # termWinFrames[termName]['butMenu3'].config(state=DISABLED)
+                    # termWinFrames[termName]['butWordsPrinted'].config(state=DISABLED)
+                    # termWinFrames[termName]['butWordLength'].config(state=DISABLED)
+                    # termWinFrames[termName]['butLockOpen'].config(state=DISABLED)
+                    # termWinFrames[termName]['butLevelDown'].config(state=DISABLED)
+                    # termWinFrames[termName]['msgBut'].config(state=DISABLED)
+            # Перебираем светильники по списку
+            for rgbName in rgbData.keys():
+                if curTime > (rgbData[rgbName]['aliveTimeStamp'] + aliveDelta) \
+                        and rgbData[rgbName]['isAlive'] == "True":
+                    rgbData[rgbName]['isAlive'] = 'False'
+            # Пауза перед следующей проверкой
+            self._stopevent.wait(self._sleepperiod)
+    def join(self, timeout=None):
+        self._stopevent.set( )
+        threading.Thread.join(self, timeout)
+
 
 class mqttThread(threading.Thread):
     def __init__(self, name='mqttThread'):
@@ -832,14 +908,6 @@ def main():
     app = QtWidgets.QApplication(sys.argv)  # Новый экземпляр QApplication
     window = ExampleApp()  # Создаём объект класса ExampleApp
 
-    # Инициализируем MQTT
-    client = mqtt.Client()  # Создаём объект типа MQTT Client
-    client.on_connect = onConnect  # Привязываем функцию для исполнения при успешном соединении с сервером
-    client.on_message = onMessage  # Привязываем функцию для исполнения при приходе сообщения в любом из подписанных каналов
-    mqttConn = mqttThread()
-    # Запускаем работу с MQTT
-    # mqttConn.start()
-
     # Заполняем цветовые статусы в меню
     for cStatus in baseColors.keys():
         window.baseStatusList.addItem(baseColors[cStatus][1])
@@ -871,15 +939,34 @@ def main():
         createTermFrame(termNum,termOrder[termNum])
     termExpanded(termOrder[0])
 
+    # Настраиваем окно с журналом
     doc = window.logWindow.document()
     doc.setMaximumBlockCount(10)
 
-    window.show()  # Показываем окно
+    window.show()  # Показываем главное окно
+
+    # Инициализируем MQTT
+    client = mqtt.Client()  # Создаём объект типа MQTT Client
+    client.on_connect = onConnect  # Привязываем функцию для исполнения при успешном соединении с сервером
+    client.on_message = onMessage  # Привязываем функцию для исполнения при приходе сообщения в любом из подписанных каналов
+    mqttConn = mqttThread()
+    # Запускаем работу с MQTT
+    # mqttConn.start()
+
+    # Инициализируем проверку жизнеспособности устройств
+    checkAlive = checkAliveThread()
+    # Запускаем проверку жизнеспособности устройств
+    # checkAlive.start()
+
     app.exec_()  # и запускаем приложение
 
-    # Убиваем MQTT еслис вернули соновное окно
+    # Убиваем MQTT если cвернули основное окно
     if (mqttConn.isAlive()):
         mqttConn.join()
+
+    # Убиваем проверку жизнеспособности устройств если cвернули основное окно
+    if (checkAlive.isAlive()):
+        checkAlive.join()
 
 if __name__ == '__main__':  # Если мы запускаем файл напрямую, а не импортируем
     main()  # то запускаем функцию main()

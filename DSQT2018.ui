@@ -444,7 +444,7 @@
     <widget class="QLabel" name="labIPAddrTerm">
      <property name="geometry">
       <rect>
-       <x>20</x>
+       <x>10</x>
        <y>30</y>
        <width>91</width>
        <height>21</height>
@@ -464,20 +464,20 @@
     <widget class="QLineEdit" name="entryIPAddrTerm">
      <property name="geometry">
       <rect>
-       <x>100</x>
+       <x>90</x>
        <y>30</y>
        <width>113</width>
        <height>21</height>
       </rect>
      </property>
      <property name="text">
-      <string>192,168,0,1</string>
+      <string/>
      </property>
     </widget>
     <widget class="QPushButton" name="butIPAddrTerm">
      <property name="geometry">
       <rect>
-       <x>220</x>
+       <x>210</x>
        <y>30</y>
        <width>75</width>
        <height>23</height>
@@ -490,9 +490,9 @@
     <widget class="QLabel" name="termNameExp">
      <property name="geometry">
       <rect>
-       <x>20</x>
+       <x>10</x>
        <y>0</y>
-       <width>351</width>
+       <width>291</width>
        <height>31</height>
       </rect>
      </property>
@@ -504,13 +504,13 @@
       </font>
      </property>
      <property name="text">
-      <string>Терминал силовой установки</string>
+      <string/>
      </property>
     </widget>
     <widget class="QCheckBox" name="checkLockTerm">
      <property name="geometry">
       <rect>
-       <x>320</x>
+       <x>340</x>
        <y>30</y>
        <width>70</width>
        <height>17</height>
@@ -528,7 +528,7 @@
     <widget class="QCheckBox" name="checkAlarmTerm">
      <property name="geometry">
       <rect>
-       <x>320</x>
+       <x>340</x>
        <y>50</y>
        <width>70</width>
        <height>17</height>
@@ -546,7 +546,7 @@
     <widget class="QCheckBox" name="checkTextTerm">
      <property name="geometry">
       <rect>
-       <x>320</x>
+       <x>340</x>
        <y>70</y>
        <width>70</width>
        <height>17</height>
@@ -564,8 +564,8 @@
     <widget class="QLabel" name="labLinkLock">
      <property name="geometry">
       <rect>
-       <x>20</x>
-       <y>100</y>
+       <x>10</x>
+       <y>90</y>
        <width>131</width>
        <height>21</height>
       </rect>
@@ -584,9 +584,9 @@
     <widget class="QComboBox" name="termLockLink">
      <property name="geometry">
       <rect>
-       <x>150</x>
-       <y>100</y>
-       <width>261</width>
+       <x>140</x>
+       <y>90</y>
+       <width>271</width>
        <height>21</height>
       </rect>
      </property>
@@ -611,7 +611,7 @@
     <widget class="QLabel" name="labWordsPrinted">
      <property name="geometry">
       <rect>
-       <x>20</x>
+       <x>10</x>
        <y>60</y>
        <width>41</width>
        <height>21</height>
@@ -631,9 +631,9 @@
     <widget class="QComboBox" name="termWordPrint">
      <property name="geometry">
       <rect>
-       <x>60</x>
+       <x>50</x>
        <y>60</y>
-       <width>31</width>
+       <width>41</width>
        <height>21</height>
       </rect>
      </property>
@@ -690,7 +690,7 @@
       <rect>
        <x>160</x>
        <y>60</y>
-       <width>31</width>
+       <width>41</width>
        <height>21</height>
       </rect>
      </property>
@@ -725,9 +725,9 @@
     <widget class="QLabel" name="labWordLength_2">
      <property name="geometry">
       <rect>
-       <x>200</x>
+       <x>210</x>
        <y>60</y>
-       <width>61</width>
+       <width>31</width>
        <height>21</height>
       </rect>
      </property>
@@ -745,9 +745,9 @@
     <widget class="QLabel" name="labMsgHead">
      <property name="geometry">
       <rect>
-       <x>20</x>
-       <y>130</y>
-       <width>81</width>
+       <x>10</x>
+       <y>120</y>
+       <width>41</width>
        <height>21</height>
       </rect>
      </property>
@@ -759,29 +759,29 @@
       </font>
      </property>
      <property name="text">
-      <string>Сообщение:</string>
+      <string>Текст:</string>
      </property>
     </widget>
     <widget class="QLineEdit" name="entryMsgHead">
      <property name="geometry">
       <rect>
-       <x>110</x>
-       <y>130</y>
-       <width>201</width>
+       <x>60</x>
+       <y>120</y>
+       <width>251</width>
        <height>21</height>
       </rect>
      </property>
      <property name="text">
-      <string>Заголовок сообщения</string>
+      <string/>
      </property>
     </widget>
     <widget class="QPlainTextEdit" name="editMsgBody">
      <property name="geometry">
       <rect>
-       <x>20</x>
-       <y>160</y>
-       <width>391</width>
-       <height>111</height>
+       <x>10</x>
+       <y>150</y>
+       <width>401</width>
+       <height>121</height>
       </rect>
      </property>
     </widget>
@@ -789,13 +789,69 @@
      <property name="geometry">
       <rect>
        <x>320</x>
-       <y>130</y>
+       <y>120</y>
        <width>91</width>
        <height>23</height>
       </rect>
      </property>
      <property name="text">
       <string>Править текст</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="termNameExp_2">
+     <property name="geometry">
+      <rect>
+       <x>300</x>
+       <y>0</y>
+       <width>41</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <pointsize>10</pointsize>
+       <weight>50</weight>
+       <bold>false</bold>
+      </font>
+     </property>
+     <property name="text">
+      <string>Запрос</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkLockTermReq">
+     <property name="geometry">
+      <rect>
+       <x>320</x>
+       <y>30</y>
+       <width>21</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <pointsize>10</pointsize>
+      </font>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkAlarmTermReq">
+     <property name="geometry">
+      <rect>
+       <x>320</x>
+       <y>50</y>
+       <width>16</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <pointsize>10</pointsize>
+      </font>
+     </property>
+     <property name="text">
+      <string/>
      </property>
     </widget>
    </widget>

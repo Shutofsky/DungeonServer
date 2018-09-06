@@ -1,13 +1,6 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file 'DSQT2018.ui'
-#
-# Created by: PyQt5 UI code generator 5.10.1
-#
-# WARNING! All changes made in this file will be lost!
-
-
 import sys
 from datetime import datetime
 from datetime import timedelta
@@ -46,6 +39,13 @@ termOrder = dict()
 termIPtoName = dict()
 termNameToNum = dict()
 
+start_time = datetime.now()
+
+def millis():
+    dt = datetime.now() - start_time
+    ms = (dt.days * 24 * 60 * 60 + dt.seconds) * 1000 + dt.microseconds / 1000.0
+    return ms
+
 def onMessage(client, userdata, msg):
     global lockData
     global lockWinFrames
@@ -69,14 +69,18 @@ def onConnect(client, userdata, flags, rc):
     client.subscribe("RGBASK/#")     # Подписка на канал RGBASK
     client.subscribe("PWRASK/#")     # Подписка на канал RGBASK
 
-def onDisonnect(client, userdata, flags, rc):
-    global mqttFlag
-    mqttFlag = False
-    addTextLog('Соединение с MQTT брокером ' + mqtt_broker_ip + ' разорвано!')
-
 def addTextLog(logString):
     dt = datetime.now()
     window.logWindow.insertPlainText(dt.strftime("%d %b %y %H:%M:%S") + ' : ' + logString + '\n')
+
+def publishLogged(channel, message):
+    global client
+    global mqttFlag
+    global mqtt_broker_ip
+    if mqttFlag:
+        client.publish(channel, message)
+    else:
+        addTextLog('Нет связи с брокером MQTT ' + mqtt_broker_ip + '!')
 
 def getButonByName(name):
     print(name)
@@ -258,13 +262,11 @@ def updateLockCard(lockName, cardCode, colorCode, mode):
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
     if cardCode not in lockData[lockName]['codes'].keys():
-        # MQTT sending here
-        # client.publish("LOCK", IPAddr + "/ADDID/"+card+"/"+color)
         req.execute("INSERT INTO lockCodes VALUES(?,?,?)", [lockName, cardCode, colorName])
-        lockData[lockName]['codes'][cardCode] = [colorName]
         conn.commit()
-        conn.close()
-        return()
+        lockData[lockName]['codes'][cardCode] = [colorName]
+        # MQTT sending here
+        publishLogged("LOCK", IPAddr + "/ADDID/"+cardCode+"/"+colorName)
     else:
         colorList = list(lockData[lockName]['codes'][cardCode])
         newColorList = []
@@ -276,23 +278,24 @@ def updateLockCard(lockName, cardCode, colorCode, mode):
         for col in colorList:
             newColorList.append(col.strip())
         if len(newColorList) == 0:
-            # MQTT sending here
-            # client.publish("LOCK", IPAddr + "/DELID/" + cardCode)
             req.execute("DELETE FROM lockCodes WHERE lockName = ? AND cardNumber = ?", \
                         [lockName, cardCode])
             conn.commit()
+            conn.close()
             del(lockData[lockName]['codes'][cardCode])
+            # MQTT sending here
+            publishLogged("LOCK", IPAddr + "/DELID/" + cardCode)
             return()
         addColorList = []
         for numColor in baseColors.keys():
             if baseColors[numColor][0] in newColorList:
                 addColorList.append(str(baseColors[numColor][0]))
-        # MQTT sending here
-        # client.publish("LOCK", IPAddr + "/CHGID/" + cardCode + "/" + ','.join(addColorList))
         req.execute("UPDATE lockCodes SET stateList = ? WHERE lockName = ? AND cardNumber = ?", \
                     [','.join(addColorList), lockName, cardCode])
         lockData[lockName]['codes'][cardCode] = addColorList
         conn.commit()
+        # MQTT sending here
+        publishLogged("LOCK", IPAddr + "/CHGID/" + cardCode + "/" + ','.join(addColorList))
     conn.close()
 
 def updateLockParm(lockName,parName,parValue):
@@ -313,15 +316,9 @@ def updateLockParm(lockName,parName,parValue):
         del(lockIPtoName[IPAddr])
         lockIPtoName[parValue] = lockName
         return
-    # mqtt добавить
+    # MQTT sending here
     jStr = '{"' + parName + '":"' + parValue + '"}'
-    print(jStr)
-    if mqttFlag:
-        client.publish("LOCK", IPAddr + "/SETPARMS/" + jStr)
-    else:
-        addTextLog('Нет связи с брокером MQTT ' + mqtt_broker_ip + '!')
-
-    print(IPAddr)
+    publishLogged("LOCK", IPAddr + "/SETPARMS/" + jStr)
 
 def termIPChange():
     doc = QtGui.QTextDocument()
@@ -331,7 +328,157 @@ def termIPChange():
     termIPChanged(termName, termIP)
 
 def termIPChanged(termName,termIP):
-    print("Смена ИП адреса " + termIP + " у терминала "+termName)
+    updateTermParm(termName, 'IPAddr', termIP)
+
+def termStateChange():
+    global termData
+    global termOrder
+    sender = window.sender()
+    butName = sender.objectName()
+    (bName, bNum) = butName.split('_')
+    termName = termOrder[int(bNum)]
+    if bName == 'butPower':
+        parmName = 'isPowerOn'
+        if termData[termName][parmName] == 'YES':
+            parmVal = 'NO'
+            bgColor = '#FF8080'
+            bText = 'Питание ВКЛ'
+        else:
+            parmVal = 'YES'
+            bgColor = 'lightgreen'
+            bText = 'Питание ВЫКЛ'
+    elif bName == 'butHack':
+        parmName = 'isHacked'
+        if termData[termName][parmName] == 'YES':
+            parmVal = 'NO'
+            bgColor = '#FF8080'
+            bText = 'Отмена взлома'
+        else:
+            parmVal = 'YES'
+            bgColor = 'lightgreen'
+            bText = 'Взломать'
+    elif bName == 'butLock':
+        parmName = 'isLocked'
+        if termData[termName][parmName] == 'YES':
+            parmVal = 'NO'
+            bgColor = 'lightgreen'
+            bText = 'Заблокировать'
+        else:
+            parmVal = 'YES'
+            bgColor = '#FF8080'
+            bText = 'Разблокировать'
+    sender.setText(bText)
+    sender.setStyleSheet("QPushButton:hover { background-color: " + bgColor + " }")
+    sender.setStyleSheet("QPushButton:!hover { background-color: " + bgColor + " }")
+    updateTermParm(termName, parmName, parmVal)
+
+def updateTermParm(termName,parName,parValue):
+    global dbName
+    global termData
+    global termIPtoName
+    IPAddr = termData[termName]['IPAddr']
+    termData[termName][parName] = parValue
+    conn = sqlite3.connect(dbName)
+    req = conn.cursor()
+    reqStr = "UPDATE termStatus SET "+parName+" = ? WHERE name = ?"
+    req.execute(reqStr,[str(parValue),str(termName)])
+    conn.commit()
+    conn.close()
+    if parName=='IPAddr':
+        del(termIPtoName[IPAddr])
+        termIPtoName[parValue] = termName
+        return
+    # MQTT sending here
+    jStr = '{"' + parName + '":"' + parValue + '"}'
+    publishLogged("TERM", IPAddr + "/UPDATEDB/" + jStr)
+
+def termExpandParm():
+    global termData
+    sender = window.sender()
+    doc = QtGui.QTextDocument()
+    doc.setHtml(window.termNameExp.text())
+    termName = doc.toPlainText()
+    bName = sender.objectName()
+    print (bName, termName)
+    if bName == 'termLockLink':
+        parmName = 'lockName'
+        parmValue = sender.currentText()
+    elif bName == 'termWordPrint':
+        parmName = 'wordsPrint'
+        parmValue = sender.currentText()
+    elif bName == 'termWordLength':
+        parmName = 'wordLength'
+        parmValue = sender.currentText()
+    elif bName == 'checkLockTermReq':
+        parmName = 'isLockOpen'
+        if sender.checkState():
+            parmValue = 'YES'
+        else:
+            parmValue = 'NO'
+    elif bName == 'checkAlarmTermReq':
+        parmName = 'isLevelDown'
+        if sender.checkState():
+            parmValue = 'YES'
+        else:
+            parmValue = 'NO'
+    elif bName == 'checkLockTerm':
+        parmName = 'menuList'
+        if sender.checkState():
+            newMenuList = termData[termName]['menuList'].split(',')
+            newMenuList.append('1')
+        else:
+            newMenuList = termData[termName]['menuList'].split(',')
+            newMenuList.remove('1')
+        newMenuList.sort()
+        parmValue = ",".join(newMenuList)
+    elif bName == 'checkAlarmTerm':
+        parmName = 'menuList'
+        if sender.checkState():
+            newMenuList = termData[termName]['menuList'].split(',')
+            newMenuList.append('2')
+        else:
+            newMenuList = termData[termName]['menuList'].split(',')
+            newMenuList.remove('2')
+        newMenuList.sort()
+        parmValue = ','.join(newMenuList)
+    elif bName == 'checkTextTerm':
+        parmName = 'menuList'
+        if sender.checkState():
+            newMenuList = termData[termName]['menuList'].split(',')
+            newMenuList.append('3')
+        else:
+            newMenuList = termData[termName]['menuList'].split(',')
+            newMenuList.remove('3')
+        newMenuList.sort()
+        parmValue = ','.join(newMenuList)
+    updateTermParm(termName, parmName, parmValue)
+
+def termUpdateText():
+    global termData
+    global dbName
+    global termData
+    doc = QtGui.QTextDocument()
+    doc.setHtml(window.termNameExp.text())
+    termName = doc.toPlainText()
+    IPAddr = window.entryIPAddrTerm.text()
+    doc = window.editMsgBody.document()
+    msgBodyStr = doc.toPlainText()
+    doc = QtGui.QTextDocument()
+    doc.setHtml(window.entryMsgHead.text())
+    msgHeadStr = doc.toPlainText()
+    termData[termName]['msgHead'] = msgHeadStr
+    termData[termName]['msgBody'] = msgBodyStr
+    conn = sqlite3.connect(dbName)
+    req = conn.cursor()
+    reqStr = "UPDATE termStatus SET msgHead = ? WHERE name = ?"
+    req.execute(reqStr, [msgHeadStr, str(termName)])
+    reqStr = "UPDATE termStatus SET msgBody = ? WHERE name = ?"
+    req.execute(reqStr, [msgBodyStr, str(termName)])
+    conn.commit()
+    conn.close()
+    # MQTT sending here
+    jStr='{"msgBody":["'+'", "'.join(msgBodyStr.replace('"','\'').split('\n'))+'"],"msgHead":"'+msgHeadStr + '"}'
+    publishLogged("TERM", IPAddr + "/UPDATEDB/" + jStr)
 
 def termExpand():
     sender = window.sender()
@@ -346,7 +493,6 @@ def termExpanded(termName):
     global termData
     window.termNameExp.setText(termName)
     window.entryIPAddrTerm.setText(termData[termName]['IPAddr'])
-
     if '1' in termData[termName]['menuList'].split(','):
         window.checkLockTerm.setChecked(True)
     else:
@@ -360,24 +506,36 @@ def termExpanded(termName):
     else:
         window.checkTextTerm.setChecked(False)
 
-    # window.checkLockTerm.clicked.connect()
-    # window.checkAlarmTerm.clicked.connect()
-    # window.checkTextTerm.clicked.connect()
+    if termData[termName]['isLockOpen'] == 'YES':
+        window.checkLockTermReq.setChecked(True)
+    else:
+        window.checkLockTermReq.setChecked(False)
+
+    if termData[termName]['isLevelDown'] == 'YES':
+        window.checkAlarmTermReq.setChecked(True)
+    else:
+        window.checkAlarmTermReq.setChecked(False)
+
+    window.checkLockTerm.clicked.connect(termExpandParm)
+    window.checkAlarmTerm.clicked.connect(termExpandParm)
+    window.checkTextTerm.clicked.connect(termExpandParm)
+    window.checkLockTermReq.clicked.connect(termExpandParm)
+    window.checkAlarmTermReq.clicked.connect(termExpandParm)
 
     window.termWordPrint.setCurrentIndex(window.termWordPrint.findText(str(termData[termName]['wordsPrinted'])))
-    # window.termWordPrint.activated.connect(функция смены параметров)
+    window.termWordPrint.activated.connect(termExpandParm)
     window.termWordLength.setCurrentIndex(window.termWordLength.findText(str(termData[termName]['wordLength'])))
-    # window.termWordPrint.activated.connect(функция смены параметров)
+    window.termWordPrint.activated.connect(termExpandParm)
 
     for i in lockOrder.keys():
         window.termLockLink.addItem(lockOrder[i])
     window.termLockLink.setCurrentIndex(window.termLockLink.findText(str(termData[termName]['lockName'])))
-    # window.termLockLink.activated.connect(функция смены параметров)
+    window.termLockLink.activated.connect(termExpandParm)
 
     window.entryMsgHead.setText(termData[termName]['msgHead'])
     window.editMsgBody.insertPlainText(termData[termName]['msgBody'].replace('"n"','\n').replace('\\"','"'))
     window.editMsgBody.moveCursor(QtGui.QTextCursor.Start,QtGui.QTextCursor.MoveAnchor)
-    # window.butMsgEdit.clicked.connect(функция обновления текста)
+    window.butMsgEdit.clicked.connect(termUpdateText)
 
 def createTermFrame(termNum,termName):
     global termData
@@ -416,9 +574,8 @@ def createTermFrame(termNum,termName):
     window.butPower.setText(powerText)
     window.butPower.setStyleSheet("QPushButton:hover { background-color: " + bgPowerColor + " }")
     window.butPower.setStyleSheet("QPushButton:!hover { background-color: " + bgPowerColor + " }")
-    # Добавить коннект на обработку кнопки включить/выключить питание
-    window.butState.setObjectName("butTPower_"+str(termNum))
-
+    window.butPower.setObjectName("butPower_"+str(termNum))
+    window.butPower.clicked.connect(termStateChange)
     if termData[termName]['isHacked'] == 'YES':
         hackText = 'Отмена взлома'
         bgHackColor = '#FF8080'
@@ -430,9 +587,8 @@ def createTermFrame(termNum,termName):
     window.butHack.setText(hackText)
     window.butHack.setStyleSheet("QPushButton:hover { background-color: " + bgHackColor + " }")
     window.butHack.setStyleSheet("QPushButton:!hover { background-color: " + bgHackColor + " }")
-    # Добавить коннект на обработку кнопки включить/выключить питание
-    window.butState.setObjectName("butTHack_"+str(termNum))
-
+    window.butHack.setObjectName("butHack_"+str(termNum))
+    window.butHack.clicked.connect(termStateChange)
     if termData[termName]['isLocked'] == 'YES':
         lockTText = 'Разблокировать'
         bgLockColor = '#FF8080'
@@ -444,17 +600,15 @@ def createTermFrame(termNum,termName):
     window.butLock.setText(lockTText)
     window.butLock.setStyleSheet("QPushButton:hover { background-color: " + bgLockColor + " }")
     window.butLock.setStyleSheet("QPushButton:!hover { background-color: " + bgLockColor + " }")
-    # Добавить коннект на обработку кнопки включить/выключить питание
-    window.butState.setObjectName("butTLock_"+str(termNum))
-
+    window.butLock.setObjectName("butLock_"+str(termNum))
+    window.butLock.clicked.connect(termStateChange)
     window.butExpand = QtWidgets.QPushButton(window.frame)
     window.butExpand.setGeometry(QtCore.QRect(300, 20, 70, 31))
     window.butExpand.setText("Подробнее")
-    window.butExpand.clicked.connect(termExpand)
     window.butExpand.setObjectName("butTermExpand_"+str(termNum))
+    window.butExpand.clicked.connect(termExpand)
     window.frame.setObjectName("frameTLock" + str(termNum))
     window.scrollTermsWidget.layout().addWidget(window.frame)
-    #window.scrollTermsForm.addWidget(window.frame)
 
 def lockExpand():
     sender = window.sender()
@@ -614,13 +768,6 @@ def baseStatusChanged(colorIndex):
     # Дальше логическая обработка смены цвета базы, выдача команд и всё вот это вот.
     #
 
-# Инициализируем MQTT
-client = mqtt.Client()  # Создаём объект типа MQTT Client
-client.on_connect = onConnect  # Привязываем функцию для исполнения при успешном соединении с сервером
-client.on_disconnect = onDisonnect  # Привязываем функцию для исполнения при обрыве связи
-client.on_socket_close = onDisonnect
-client.on_message = onMessage  # Привязываем функцию для исполнения при приходе сообщения в любом из подписанных каналов
-
 class ExampleApp(QtWidgets.QMainWindow):
     def __init__(self):
         # Это здесь нужно для доступа к переменным, методам
@@ -644,7 +791,6 @@ class mqttThread(threading.Thread):
         global client
         while not self._stopevent.isSet( ):
             if not mqttFlag:
-                client.loop_start()
                 try:  # Пробуем соединиться с сервером
                     addTextLog('Устанавливаю соединение с MQTT брокером ' + mqtt_broker_ip + '...')
                     client.connect(mqtt_broker_ip, mqtt_broker_port)
@@ -660,7 +806,12 @@ class mqttThread(threading.Thread):
             else:
                 client.publish('TERM', "*/PING")  # Запрос PING для всех терминалов (канал TERM)
                 client.publish('LOCK', "*/PING")  # Запрос PING для всех замков (канал LOCK)
-                client.publish('RGB', "*/PING")  # Запрос PING для всех светильников (канал RGB)
+                rc = client.publish('RGB', "*/PING")  # Запрос PING для всех светильников (канал RGB)
+                if int(str(rc[0])) != 0:
+                    addTextLog('Соединение с MQTT брокером ' + mqtt_broker_ip + ' потеряно. Повтор соединения.')
+                    client.loop_stop()
+                    mqttFlag = False
+                    time.sleep(4)
             self._stopevent.wait(self._sleepperiod)
     def join(self, timeout=None):
         self._stopevent.set( )
@@ -669,6 +820,7 @@ class mqttThread(threading.Thread):
 def main():
     global window
     global dbName
+    global client
     global app
 
     # Читаем данные из БД
@@ -680,12 +832,13 @@ def main():
     app = QtWidgets.QApplication(sys.argv)  # Новый экземпляр QApplication
     window = ExampleApp()  # Создаём объект класса ExampleApp
 
-    # mqttConn = threading.Thread(name='mqttConn', target=mqttConnInit)
+    # Инициализируем MQTT
+    client = mqtt.Client()  # Создаём объект типа MQTT Client
+    client.on_connect = onConnect  # Привязываем функцию для исполнения при успешном соединении с сервером
+    client.on_message = onMessage  # Привязываем функцию для исполнения при приходе сообщения в любом из подписанных каналов
     mqttConn = mqttThread()
-    # mqttConn = mqttThread(name='mqttConn', target=mqttConnInit)
-    mqttConn.start()
-
-    # mqttConnInit()
+    # Запускаем работу с MQTT
+    # mqttConn.start()
 
     # Заполняем цветовые статусы в меню
     for cStatus in baseColors.keys():
@@ -720,18 +873,11 @@ def main():
 
     doc = window.logWindow.document()
     doc.setMaximumBlockCount(10)
-#    i=0
-#    while i<100:
-#        #window.logWindow.insertHtml('<TABLE BORDER=0, WIDTH=100%>')
-#        # window.logWindow.insertPlainText(repr(i) + '\n')
-#        # window.logWindow.insertHtml('<HTML><BODY><P>Текст ' + str(i) + ' <BR></P></BODY></HTML>')
-#        # window.logWindow.insertHtml('<TR><TD style="background-color:#FFFFFF">' + repr(i) + '</TD></TR>')
-#        #window.logWindow.insertHtml('</TABLE>')
-#        window.logWindow.insertPlainText('Текст ' + str(i) + '\n')
-#        i+=1
 
     window.show()  # Показываем окно
     app.exec_()  # и запускаем приложение
+
+    # Убиваем MQTT еслис вернули соновное окно
     if (mqttConn.isAlive()):
         mqttConn.join()
 

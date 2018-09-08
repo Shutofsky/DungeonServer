@@ -11,10 +11,13 @@ import paho.mqtt.client as mqtt
 import json
 from PyQt5 import QtCore, QtGui, QtWidgets, uic
 
-# Настройки MQTT
+window = None
 
-#mqtt_broker_ip = '192.168.0.200'
-mqtt_broker_ip = '10.23.192.193'
+# Настройки MQTT
+#
+mqtt_broker_ip = '192.168.0.200'
+# mqtt_broker_ip = 'localhost'
+# mqtt_broker_ip = '10.23.192.193'
 mqtt_broker_port = 1883
 mqttFlag = False
 
@@ -46,21 +49,88 @@ rgbData = dict()
 
 start_time = datetime.now()
 
+def getObjectByName(name):
+    widgets = QtWidgets.QApplication.allWidgets()
+    for x in widgets:
+        if str(x.objectName()) == name:
+            return x
+
+def setButtonData(button,color,text):
+    button.setStyleSheet("QPushButton:hover { background-color: " + color + " }")
+    button.setStyleSheet("QPushButton:!hover { background-color: " + color + " }")
+    button.setText(text)
+
+def setLabelData(label, color, text):
+    palette = label.palette()
+    palette.setColor(palette.WindowText, QtGui.QColor(color))
+    label.setPalette(palette)
+
+def setTermActive(termName, signal):
+    global termNameToNum
+    termNum = termNameToNum[termName]
+    if signal:
+        color = 'green'
+    else:
+        color = 'red'
+    setLabelData(getObjectByName('Lab_'+termName), color, termName)
+    getObjectByName('butPower_' + str(termNum)).setEnabled(signal)
+    getObjectByName('butHack_' + str(termNum)).setEnabled(signal)
+    getObjectByName('butLock_' + str(termNum)).setEnabled(signal)
+    if termName == window.termNameExp.text():
+        setLabelData(window.termNameExp, color, termName)
+        window.butMsgEdit.setEnabled(signal)
+        window.checkLockTerm.setEnabled(signal)
+        window.checkAlarmTerm.setEnabled(signal)
+        window.checkTextTerm.setEnabled(signal)
+        window.checkLockTermReq.setEnabled(signal)
+        window.checkAlarmTermReq.setEnabled(signal)
+        window.termWordPrint.setEnabled(signal)
+        window.termWordLength.setEnabled(signal)
+        window.termLockLink.setEnabled(signal)
+
+def setLockActive(lockName, signal):
+    global lockNameToNum
+    global cardNames
+    global lockData
+    global lockOrder
+    global window
+    lockNum = lockNameToNum[lockName]
+    if signal:
+        color = 'green'
+    else:
+        color = 'red'
+    setLabelData(getObjectByName('Lab_' + lockName), color, lockName)
+    getObjectByName('butState_' + str(lockNum)).setEnabled(signal)
+    getObjectByName('butBlock_' + str(lockNum)).setEnabled(signal)
+    getObjectByName('butSound_' + str(lockNum)).setEnabled(signal)
+    if lockName == window.lockNameExpand.text():
+        setLabelData(window.lockNameExpand, color, lockName)
+        for idCode in cardNames.keys():
+            getObjectByName("frame_" + idCode).setEnabled(signal)
+    for i in lockOrder.keys():
+        try:
+            getObjectByName('butExpand_'+str(i)).setEnabled(True)
+        except BaseException:
+            continue
+
+def setTermStatus(termName):
+    global termData
+    if termData[termName]['isAlive'] == 'True':
+        setTermActive(termName, True)
+    else:
+        setTermActive(termName, False)
+
+def setLockStatus(lockName):
+    global lockData
+    if lockData[lockName]['isAlive'] == 'True':
+        setLockActive(lockName, True)
+    else:
+        setLockActive(lockName, False)
+
 def millis():
     dt = datetime.now() - start_time
     ms = (dt.days * 24 * 60 * 60 + dt.seconds) * 1000 + dt.microseconds / 1000.0
     return ms
-
-def onMessage(client, userdata, msg):
-    global lockData
-    global lockWinFrames
-    global lockIPtoName
-    global baseColors
-    global baseData
-    global baseWinFrame
-    print(msg.payload.decode('utf-8'))
-    commList = msg.payload.decode('utf-8').split('/')  # Разделяем тело сообщения на элементы списка по знаку /
-    print(commList[1])
 
 def onConnect(client, userdata, flags, rc):
     global mqttFlag
@@ -74,6 +144,166 @@ def onConnect(client, userdata, flags, rc):
     client.subscribe("RGBASK/#")     # Подписка на канал RGBASK
     client.subscribe("PWRASK/#")     # Подписка на канал RGBASK
 
+def onMessage(client, userdata, msg):
+    global lockOrder
+    global lockData
+    global lockIPtoName
+    global lockNameToNum
+    global baseColors
+    global baseData
+    global termOrder
+    global termData
+    global termIPtoName
+    global termNameToNum
+    global window
+    commList = msg.payload.decode('utf-8').split('/')  # Разделяем тело сообщения на элементы списка по знаку /
+    # commList[0] - IP-адрес устройства, и т.д.
+    if msg.topic == 'TERMASK':
+        # Здесь должна быть обработка сообщений для канала TERMASK
+        if commList[0] not in termIPtoName.keys():
+            # Стукнулось неизвестное устройтство  - терминал
+            if commList[0] != window.newObjIPAddr.text():
+                # Окно для этого устройства ещё не создано
+                print('Создаем окно')
+                newObjectWinCreate('терминал', commList[0])
+        else:
+            termName = termIPtoName[commList[0]]
+            termNum = termNameToNum[termName]
+            if commList[1] == 'PONG':
+                termData[termName]['aliveTimeStamp'] = millis()
+                if termData[termName]['isAlive'] == "False":
+                    jsStr = '{'
+                    for parName in termData[termName].keys():
+                        if parName != 'lockName' and parName != 'isAlive' \
+                                and parName != 'aliveTimeStamp' and parName != 'IPAddr' \
+                                and parName != 'msgBody' and parName != 'msgHead':
+                            jsStr += '"' + parName + '":"' + str(termData[termName][parName]) + '",'
+                    #                    jsStr += '"msgBody":["' + '","'.join(termData[termName]['msgBody']) + '"]}'
+                    jsStr = jsStr.rstrip(',') + "}"
+                    publishLogged("TERM", commList[0] + "/UPDATEDB/" + jsStr)
+                    termData[termName]['isAlive'] = 'True'
+                    setTermActive(termName, True)
+            elif commList[1] == 'LOCKED':
+                logStr = 'Терминал "' + termName + '" заблокирован!'
+                addTextLog(logStr)
+                alarmChanged(+10)
+                setButtonData(getObjectByName('butLock_' + str(termNum)), '#FF8080', 'Разблокировать')
+                updateTermParm(termName, 'isLocked', 'YES')
+            elif commList[1] == 'HACKED':
+                logStr = 'Терминал "' + termName + '" взломан!\n'
+                addTextLog(logStr)
+                alarmChanged(+5)
+                setButtonData(getObjectByName('butHack_' + str(termNum)), '#FF8080', 'Отмена взлома')
+                updateTermParm(termName, 'isHacked', 'YES')
+            elif commList[1] == 'DOLEVELDOWN':
+                logStr = 'С терминала "' + termName + '" запрошено снижение уровня тревоги!'
+                addTextLog(logStr)
+                #
+                # Обработка снижения уролвня тревоги
+                #
+                window.checkAlarmTermReq.setChecked(True)
+                updateTermParm(termName, 'isLevelDown', 'YES')
+            elif commList[1] == 'DOLOCKOPEN':
+                logStr = 'С терминала "' + termName + '" запрошено открытие замка "'
+                if termData[termName]['lockName'] in lockData.keys():
+                    logStr += termData[termName]['lockName'] + '"!'
+                    window.checkLockTermReq.setChecked(True)
+                    updateTermParm(termName, 'isLockOpen', 'YES')
+                    publishLogged('LOCK', lockData[termData[termName]['lockName']]['IPAddr'] + '/OPEN')
+                addTextLog(logStr)
+    elif msg.topic == 'LOCKASK':
+        # Здесь должна быть обработка сообщений для канала LOCKASK
+        if commList[0] not in lockIPtoName.keys():
+            # Стукнулось неизвестное устройтство  - замок
+            if commList[0] != window.newObjIPAddr.text():
+                # Окно для этого устройства ещё не создано
+                newObjectWinCreate('замок', commList[0])
+        else:
+            lockName = lockIPtoName[commList[0]]
+            lockNum = lockNameToNum[lockName]
+            if commList[1] == 'PONG':
+                lockData[lockName]['aliveTimeStamp'] = millis()
+                if lockData[lockName]['isAlive'] == "False":
+                    jsStr = '{'
+                    for parName in lockData[lockName].keys():
+                        if parName != 'isAlive' and parName != 'aliveTimeStamp':
+                            jsStr += '"' + parName + '":"' + str(lockData[lockName][parName]) + '",'
+                    jsStr = jsStr.rstrip(',') + "}"
+                    publishLogged("LOCK", commList[0] + "/SETPARAMS/" + jsStr)
+                    lockData[lockName]['isAlive'] = 'True'
+                    setLockActive(lockName, True)
+            elif commList[1] == 'SOUND':
+                updateLockParm(lockName, 'isSound', 'YES')
+                getObjectByName('butSound_' + str(lockNum)).setEnabled(True)
+            elif commList[1] == 'NOSOUND':
+                updateLockParm(lockName, 'isSound', 'NO')
+                getObjectByName('butSound_' + str(lockNum)).setEnabled(True)
+            elif commList[1] == 'OPENED':
+                updateLockParm(lockName, 'lockState', 'opened')
+                logStr = 'Замок "' + lockName + '" открыт'
+                addTextLog(logStr)
+                getObjectByName('butState_' + str(lockNum)).setEnabled(True)
+                getObjectByName('butBlock_' + str(lockNum)).setEnabled(True)
+            elif commList[1] == 'CLOSED':
+                updateLockParm(lockName, 'lockState', 'closed')
+                logStr = 'Замок "' + lockName + '" закрыт'
+                addTextLog(logStr)
+                getObjectByName('butState_' + str(lockNum)).setEnabled(True)
+                getObjectByName('butBlock_' + str(lockNum)).setEnabled(True)
+            elif commList[1] == 'BLOCKED':
+                updateLockParm(lockName, 'lockState', 'blocked')
+                logStr = 'Замок "' + lockName + '" заблокирован'
+                addTextLog(logStr)
+                getObjectByName('butState_' + str(lockNum)).setEnabled(False)
+                getObjectByName('butBlock_' + str(lockNum)).setEnabled(True)
+            elif commList[1] == 'CODE':
+                logStr = 'К замку "' + lockName + '" приложена карта ' + commList[3]
+                dt = datetime.now()
+                if commList[2] == 'RIGHT':
+                    logStr += ' ВЕРНО!!!'
+                elif commList[2] == 'STATUSWRONG':
+                    alarmChanged(+3)
+                    logStr += ' НЕВЕРНО - СТАТУС!'
+                elif commList[2] == 'GLOBALWRONG':
+                    alarmChanged(+5)
+                    logStr += ' НЕВЕРНО - НЕИЗВЕСТНАЯ КАРТА!'
+                addTextLog(logStr)
+    elif msg.topic == 'RGBASK':
+        # Здесь должна быть обработка сообщений для канала RGBASK
+        if commList[0] not in rgbData.keys():
+            # Стукнулось неизвестное устройтство  - светильник
+            rgbData[commList[0]] = dict()
+            rgbData[commList[0]]['IPAddr'] = commList[0]
+            rgbData[commList[0]]['isAlive'] = 'False'
+            rgbData[commList[0]]['aliveTimeStamp'] = 0
+            conn = sqlite3.connect(dbName)
+            req = conn.cursor()
+            req.execute("INSERT INTO rgbStatus VALUES(?, ?)", [commList[0], commList[0]])
+            conn.commit()
+            conn.close()
+        else:
+            if commList[1] == 'PONG':
+                rgbData[commList[0]]['aliveTimeStamp'] = millis()
+                if rgbData[commList[0]]['isAlive'] == 'False':
+                    rgbData[commList[0]]['isAlive'] = 'True'
+                    for commStr in baseCommand[baseData['colorStatus']]['rgbCommand']:
+                        client.publish('RGB', commList[0] + commStr)
+                        time.sleep(0.1)
+    elif msg.topic == 'PWRASK':
+        # Здесь должна быть обработка сообщений для канала PWRASK
+        if commList[0] == 'AUX':
+            # Запущено промежуточное питание
+            if baseData['colorStatus'] == 'blue':
+                logStr = 'Силовой щиток - активировано вспомогательное питание! \n'
+                addTextLog(logStr)
+                baseStatusChanged(2)
+        if commList[0] == 'PWR':
+            # Запущено основное питание
+            if baseData['colorStatus'] == 'lightblue':
+                logStr = 'Силовой щиток - запуск основного реактора! \n'
+                addTextLog(logStr)
+                baseStatusChanged(2)
+
 def addTextLog(logString):
     dt = datetime.now()
     window.logWindow.insertPlainText(dt.strftime("%d %b %y %H:%M:%S") + ' : ' + logString + '\n')
@@ -86,13 +316,6 @@ def publishLogged(channel, message):
         client.publish(channel, message)
     else:
         addTextLog('Нет связи с брокером MQTT ' + mqtt_broker_ip + '!')
-
-def getButonByName(name):
-    print(name)
-    widgets = QtWidgets.QApplication.allWidgets()
-    for x in widgets:
-        if str(x.objectName()) == name:
-            return x
 
 def readColorData():
     global baseColors
@@ -128,7 +351,6 @@ def readBaseData():
 
 def readRGBData():
     global rgbData
-    jsStr = '{'
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
     for row in req.execute("SELECT rgbName, rgbIPAddr \
@@ -162,11 +384,10 @@ def readLockData():
                                         FROM lockCodes \
                                         WHERE lockName = ?",[row[0]]):
             jsStr += '"'+rowCard[0]+'":["'+'","'.join(rowCard[1].split(','))+'"],'
-
         jsStr = jsStr.rstrip(',') + '}},'
     jsStr = jsStr.rstrip(',') + '}'
     lockData = json.loads(jsStr)
-    print (jsStr)
+    # print (jsStr)
     for row in req.execute("SELECT * FROM lockOrder ORDER BY lockNumber"):
         lockOrder[row[0]] = row[1]
         lockNameToNum[row[1]] = row[0]
@@ -184,20 +405,56 @@ def readTermData():
                                 wordsPrinted, menuList, msgHead, msgBody, lockName  \
                                 FROM termStatus \
                                 ORDER BY name"):
-        jsStr += '"'+row[0]+'":{"IPAddr":"'+row[1]+'","isPowerOn":"'+row[2]+'","isLocked":"'+row[3]+ \
-                 '","isHacked":"'+row[4]+'","isLockOpen":"'+row[5]+'","isLevelDown":"'+row[6]+\
-                 '","attempts":'+str(row[7])+',"wordLength":'+str(row[8])+',"wordsPrinted":'+str(row[9])+\
-                 ',"menuList":"'+row[10]+'","msgHead":"'+row[11]+'","msgBody":"'+ \
-                 row[12].replace('"','\\"').replace('\n', '\\"n\\"')+\
-                 '","lockName":"'+row[13]+'","isAlive":"False","aliveTimeStamp":0},'
+        jsStr += '"'+row[0]+'":{"IPAddr":"'+row[1]+'","isPowerOn":"'+row[2]+'","isLocked":"'+row[3] + \
+                 '","isHacked":"'+row[4]+'","isLockOpen":"'+row[5]+'","isLevelDown":"'+row[6] + \
+                 '","attempts":'+str(row[7])+',"wordLength":'+str(row[8])+',"wordsPrinted":'+str(row[9]) + \
+                 ',"menuList":"'+row[10]+'","msgHead":"'+row[11]+'","msgBody":["' + \
+                 '","'.join(row[12].replace('"', '\\"').split('\n')) + \
+                 '"],"lockName":"'+row[13]+'","isAlive":"False","aliveTimeStamp":0},'
         termIPtoName[row[1]] = row[0]
     jsStr = jsStr.rstrip(',') + '}'
-    print (jsStr)
     termData = json.loads(jsStr)
     for row in req.execute("SELECT * FROM termOrder ORDER BY termNumber"):
         termOrder[row[0]] = row[1]
         termNameToNum[row[1]] = row[0]
     conn.close()
+
+def newObjectWinCreate(objType,IPAddr):
+    global lockOrder
+    global termOrder
+    global lockData
+    global termData
+    global window
+    if objType == 'замок':
+        objOrder = lockOrder
+    elif objType == 'терминал':
+        objOrder = termOrder
+    window.newObjType.setText(objType)
+    window.newObjIPAddr.setText(IPAddr)
+    for objNum in objOrder.keys():
+        window.newObjList.addItem(objOrder[objNum])
+    window.newObjList.setCurrentIndex(window.newObjList.findText(objOrder[0]))
+
+def newItemReg():
+    global newObjWin
+    global window
+    print(window.newObjIPAddr.text())
+    print(window.newObjList.currentText())
+    print(window.newObjType.text())
+    objType = window.newObjType.text()
+    IPAddr = window.newObjIPAddr.text()
+    objName = window.newObjList.currentText()
+    if objType == 'замок':
+        if window.lockNameExpand.text() == objName:
+            window.entryIPAddrLock.setText(IPAddr)
+        updateLockParm(objName,'IPAddr',IPAddr)
+    elif objType == 'терминал':
+        if window.termNameExp.text() == objName:
+            window.entryIPAddrTerm.setText(IPAddr)
+        updateTermParm(objName, 'IPAddr', IPAddr)
+    window.newObjType.setText('')
+    window.newObjIPAddr.setText('')
+    window.newObjList.clear()
 
 def lockIPChange():
     doc = QtGui.QTextDocument()
@@ -214,6 +471,7 @@ def lockStateChange():
     (bName, bNum) = butName.split('_')
     lockName = lockOrder[int(bNum)]
     if bName == 'butState':
+        sender.setDisabled(True)
         parmName = 'lockState'
         if lockData[lockName][parmName] == 'opened':
             parmVal = 'closed'
@@ -226,8 +484,9 @@ def lockStateChange():
         sender.setStyleSheet("QPushButton:hover { background-color: " + bgColor + " }")
         sender.setStyleSheet("QPushButton:!hover { background-color: " + bgColor + " }")
     elif bName == 'butBlock':
+        sender.setDisabled(True)
         parmName = 'lockState'
-        bState = getButonByName('butState_' + str(bNum))
+        bState = getObjectByName('butState_' + str(bNum))
         bgColor = 'lightgreen'
         bState.setStyleSheet("QPushButton:hover { background-color: " + bgColor + " }")
         bState.setStyleSheet("QPushButton:!hover { background-color: " + bgColor + " }")
@@ -256,6 +515,9 @@ def lockStateChange():
             sender.setText('Звук ВЫКЛ')
         sender.setStyleSheet("QPushButton:hover { background-color: " + bgColor + " }")
         sender.setStyleSheet("QPushButton:!hover { background-color: " + bgColor + " }")
+    # MQTT sending here
+    jStr = '{"' + parmName + '":"' + parmVal + '"}'
+    publishLogged("LOCK", lockData[lockName]['IPAddr'] + "/SETPARMS/" + jStr)
     updateLockParm(lockName, parmName, parmVal)
 
 def lockCardChange():
@@ -334,18 +596,12 @@ def updateLockParm(lockName,parName,parValue):
         del(lockIPtoName[IPAddr])
         lockIPtoName[parValue] = lockName
         return
-    # MQTT sending here
-    jStr = '{"' + parName + '":"' + parValue + '"}'
-    publishLogged("LOCK", IPAddr + "/SETPARMS/" + jStr)
 
 def termIPChange():
     doc = QtGui.QTextDocument()
     doc.setHtml(window.termNameExp.text())
     termName = doc.toPlainText()
     termIP = window.entryIPAddrTerm.text()
-    termIPChanged(termName, termIP)
-
-def termIPChanged(termName,termIP):
     updateTermParm(termName, 'IPAddr', termIP)
 
 def termStateChange():
@@ -369,12 +625,12 @@ def termStateChange():
         parmName = 'isHacked'
         if termData[termName][parmName] == 'YES':
             parmVal = 'NO'
-            bgColor = '#FF8080'
-            bText = 'Отмена взлома'
-        else:
-            parmVal = 'YES'
             bgColor = 'lightgreen'
             bText = 'Взломать'
+        else:
+            parmVal = 'YES'
+            bgColor = '#FF8080'
+            bText = 'Отмена взлома'
     elif bName == 'butLock':
         parmName = 'isLocked'
         if termData[termName][parmName] == 'YES':
@@ -494,7 +750,8 @@ def termUpdateText():
     conn.commit()
     conn.close()
     # MQTT sending here
-    jStr='{"msgBody":["'+'", "'.join(msgBodyStr.replace('"','\'').split('\n'))+'"],"msgHead":"'+msgHeadStr + '"}'
+    #
+    jStr = '{"msgBody":' + json.dumps(msgBodyStr.split('\n')) + '}'
     publishLogged("TERM", IPAddr + "/UPDATEDB/" + jStr)
 
 def termExpand():
@@ -522,7 +779,6 @@ def termExpanded(termName):
         window.checkTextTerm.setChecked(True)
     else:
         window.checkTextTerm.setChecked(False)
-
     if termData[termName]['isLockOpen'] == 'YES':
         window.checkLockTermReq.setChecked(True)
     else:
@@ -532,27 +788,15 @@ def termExpanded(termName):
         window.checkAlarmTermReq.setChecked(True)
     else:
         window.checkAlarmTermReq.setChecked(False)
-
-    window.checkLockTerm.clicked.connect(termExpandParm)
-    window.checkAlarmTerm.clicked.connect(termExpandParm)
-    window.checkTextTerm.clicked.connect(termExpandParm)
-    window.checkLockTermReq.clicked.connect(termExpandParm)
-    window.checkAlarmTermReq.clicked.connect(termExpandParm)
-
     window.termWordPrint.setCurrentIndex(window.termWordPrint.findText(str(termData[termName]['wordsPrinted'])))
-    window.termWordPrint.activated.connect(termExpandParm)
     window.termWordLength.setCurrentIndex(window.termWordLength.findText(str(termData[termName]['wordLength'])))
-    window.termWordPrint.activated.connect(termExpandParm)
-
     for i in lockOrder.keys():
         window.termLockLink.addItem(lockOrder[i])
     window.termLockLink.setCurrentIndex(window.termLockLink.findText(str(termData[termName]['lockName'])))
-    window.termLockLink.activated.connect(termExpandParm)
-
     window.entryMsgHead.setText(termData[termName]['msgHead'])
-    window.editMsgBody.insertPlainText(termData[termName]['msgBody'].replace('"n"','\n').replace('\\"','"'))
+    window.editMsgBody.insertPlainText('\n'.join(termData[termName]['msgBody']))
     window.editMsgBody.moveCursor(QtGui.QTextCursor.Start,QtGui.QTextCursor.MoveAnchor)
-    window.butMsgEdit.clicked.connect(termUpdateText)
+    setTermStatus(termName)
 
 def createTermFrame(termNum,termName):
     global termData
@@ -572,14 +816,7 @@ def createTermFrame(termNum,termName):
     font.setBold(True)
     font.setWeight(75)
     window.termName.setFont(font)
-    if termData[termName]['isAlive'] == 'True':
-        fgColor = 'green'
-    else:
-        fgColor = 'red'
-    palette = window.termName.palette()
-    palette.setColor(palette.WindowText, QtGui.QColor(fgColor))
-    window.termName.setPalette(palette)
-    window.termName.setObjectName(termName)
+    window.termName.setObjectName('Lab_'+termName)
     if termData[termName]['isPowerOn'] == 'YES':
         powerText = 'Питание ВЫКЛ'
         bgPowerColor = 'lightgreen'
@@ -626,8 +863,14 @@ def createTermFrame(termNum,termName):
     window.butExpand.clicked.connect(termExpand)
     window.frame.setObjectName("frameTLock" + str(termNum))
     window.scrollTermsWidget.layout().addWidget(window.frame)
+    setTermStatus(termName)
 
 def lockExpand():
+    global lockData
+    global lockOrder
+    global window
+    for lockNum in lockOrder.keys():
+        getObjectByName('butExpand_'+str(lockNum)).setDisabled(True)
     sender = window.sender()
     bName = sender.objectName()
     lockNum = int((bName.split('_'))[1])
@@ -635,13 +878,26 @@ def lockExpand():
     lockExpanded(lockName)
 
 def lockExpanded(lockName):
+    global lockData
+    global lockOrder
+    global baseColors
+    global window
     window.lockNameExpand.setText(lockName)
     window.entryIPAddrLock.setText(lockData[lockName]['IPAddr'])
-    # Очищаем окно (layout)
-    for i in reversed(range(window.scrollCodesWidget.layout().count())):
-        widgetToRemove = window.scrollCodesWidget.layout().itemAt(i).widget()
-        window.scrollCodesWidget.layout().removeWidget(widgetToRemove)
-        widgetToRemove.setParent(None)
+    for idCode in cardNames.keys():
+        i = 1
+        while i<6:
+            bgColor=baseColors[str(i)][0]
+            if (idCode not in lockData[lockName]['codes'].keys()) \
+                    or (bgColor not in lockData[lockName]['codes'][idCode]):
+                getObjectByName('checkBox_'+idCode+'_'+str(i)).setChecked(False)
+            else:
+                getObjectByName('checkBox_' + idCode + '_' + str(i)).setChecked(True)
+            i = i + 1
+    setLockStatus(lockName)
+
+def createLockExpand():
+    global cardNames
     for idCode in cardNames.keys():
         window.frame = QtWidgets.QFrame()
         window.frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
@@ -659,11 +915,6 @@ def lockExpanded(lockName):
             window.checkBox.setGeometry(QtCore.QRect(230+19*i, 0, 17, 17))
             window.checkBox.setText("")
             bgColor=baseColors[str(i)][0]
-            if (idCode not in lockData[lockName]['codes'].keys()) \
-                    or (bgColor not in lockData[lockName]['codes'][idCode]):
-                window.checkBox.setChecked(False)
-            else:
-                window.checkBox.setChecked(True)
             window.checkBox.setStyleSheet('background-color: ' + bgColor)
             window.checkBox.clicked.connect(lockCardChange)
             window.checkBox.setObjectName("checkBox_"+idCode+"_"+str(i))
@@ -671,13 +922,13 @@ def lockExpanded(lockName):
         window.frame.setObjectName("frame_" + idCode)
         window.scrollCodesWidget.layout().addWidget(window.frame)
 
+
 def createLockFrame(lockNum, lockName):
     global lockData
     global cardNames
     global lockOrder
     global lockIPtoName
     global window
-
     window.frame = QtWidgets.QFrame()
     window.frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
     window.frame.setFrameShadow(QtWidgets.QFrame.Raised)
@@ -691,14 +942,7 @@ def createLockFrame(lockNum, lockName):
     font.setBold(True)
     font.setWeight(75)
     window.lockName.setFont(font)
-    if lockData[lockName]['isAlive'] == 'True':
-        fgColor = 'green'
-    else:
-        fgColor = 'red'
-    palette = window.lockName.palette()
-    palette.setColor(palette.WindowText, QtGui.QColor(fgColor))
-    window.lockName.setPalette(palette)
-    window.lockName.setObjectName(lockName)
+    window.lockName.setObjectName('Lab_'+lockName)
     if lockData[lockName]['lockState'] == 'opened':
         stateText = 'Закрыть'
         blockText = 'Заблокировать'
@@ -746,8 +990,9 @@ def createLockFrame(lockNum, lockName):
     window.butExpand.setText("Подробнее")
     window.butExpand.clicked.connect(lockExpand)
     window.butExpand.setObjectName("butExpand_" + str(lockNum))
-    window.frame.setObjectName("frameLock" + str(lockNum))
+    window.frame.setObjectName("frameLock_" + str(lockNum))
     window.scrollLocksWidget.layout().addWidget(window.frame)
+    setLockStatus(lockName)
 
 def changeBaseScore():
     global window
@@ -763,7 +1008,6 @@ def alarmChanged(delta):
     #
     # Обработка изменения тревоги
     #
-
 
 def changeBaseStatus(colorIndex):
     global baseData
@@ -791,15 +1035,38 @@ class ExampleApp(QtWidgets.QMainWindow):
         # и т.д. в файле design.py
         super().__init__()
         uic.loadUi('DSQT2018.ui', self)
+        # Настраиваем обработчик смены цвета.
         self.baseStatusList.activated.connect(self.baseStatusUserChanged)
+        # Настраиваем обработчики для кнопок сменой ИП объекта
         self.butIPAddrTerm.clicked.connect(termIPChange)
         self.butIPAddrLock.clicked.connect(lockIPChange)
+        # Настраиваем обработчики для кнопок управления уровнем тревоги
+        self.butMinus1.clicked.connect(changeBaseScore)
+        self.butMinus5.clicked.connect(changeBaseScore)
+        self.butMinus10.clicked.connect(changeBaseScore)
+        self.butPlus1.clicked.connect(changeBaseScore)
+        self.butPlus5.clicked.connect(changeBaseScore)
+        self.butPlus10.clicked.connect(changeBaseScore)
+        # Настриваем обработчики для органов управления текущим открытым терминалом
+        self.checkLockTerm.clicked.connect(termExpandParm)
+        self.checkAlarmTerm.clicked.connect(termExpandParm)
+        self.checkTextTerm.clicked.connect(termExpandParm)
+        self.checkLockTermReq.clicked.connect(termExpandParm)
+        self.checkAlarmTermReq.clicked.connect(termExpandParm)
+        self.termWordPrint.activated.connect(termExpandParm)
+        self.termWordLength.activated.connect(termExpandParm)
+        self.termLockLink.activated.connect(termExpandParm)
+        self.butMsgEdit.clicked.connect(termUpdateText)
+        # Настраиваем окно с журналом
+        self.doc = self.logWindow.document()
+        self.doc.setMaximumBlockCount(10)
+        self.newObjList.activated.connect(newItemReg)
     def baseStatusUserChanged(self, value):
         changeBaseStatus(value)
 
 class checkAliveThread(threading.Thread):
     def __init__(self, name='checkAliveThread'):
-        self._stopevent = threading.Event( )
+        self._stopevent = threading.Event()
         self._sleepperiod = 1.0
         threading.Thread.__init__(self, name=name)
     def run(self):
@@ -817,34 +1084,14 @@ class checkAliveThread(threading.Thread):
                         and lockData[lockName]['isAlive'] == "True":
                     # Замок был живым, стал мёртвым
                     lockData[lockName]['isAlive'] = "False"
-                    # Помечаем неактивными его органы управления.
-                    # lockWinFrames[lockName]['labLockLive'].config(bg="red")
-                    # lockWinFrames[lockName]['butSoundOn'].config(state=DISABLED)
-                    # lockWinFrames[lockName]['butSoundOff'].config(state=DISABLED)
-                    # lockWinFrames[lockName]['butOpen'].config(state=DISABLED)
-                    # lockWinFrames[lockName]['butClose'].config(state=DISABLED)
-                    # lockWinFrames[lockName]['butBlock'].config(state=DISABLED)
-                    # for idBStr in lockWinFrames[lockName]['codeFrame'].keys():
-                    #     if idBStr.find("but") != -1:
-                    #         lockWinFrames[lockName]['codeFrame'][idBStr].config(state=DISABLED)
+                    setLockActive(lockName,False)
             # Перебираем термианлы по списку
             for termName in termData.keys():
                 if curTime > (termData[termName]['aliveTimeStamp'] + aliveDelta) \
                         and termData[termName]['isAlive'] == "True":
                     # Терминал был живым, стал мёртвым
-                    termData[termName]['isAlive'] = "False"
-                    # termWinFrames[termName]['labTermLive'].config(bg="red")
-                    # termWinFrames[termName]['butPowered'].config(state=DISABLED)
-                    # termWinFrames[termName]['butLocked'].config(state=DISABLED)
-                    # termWinFrames[termName]['butHacked'].config(state=DISABLED)
-                    # termWinFrames[termName]['butMenu1'].config(state=DISABLED)
-                    # termWinFrames[termName]['butMenu2'].config(state=DISABLED)
-                    # termWinFrames[termName]['butMenu3'].config(state=DISABLED)
-                    # termWinFrames[termName]['butWordsPrinted'].config(state=DISABLED)
-                    # termWinFrames[termName]['butWordLength'].config(state=DISABLED)
-                    # termWinFrames[termName]['butLockOpen'].config(state=DISABLED)
-                    # termWinFrames[termName]['butLevelDown'].config(state=DISABLED)
-                    # termWinFrames[termName]['msgBut'].config(state=DISABLED)
+                    termData[termName]['isAlive'] = 'False'
+                    setTermActive(termName, False)
             # Перебираем светильники по списку
             for rgbName in rgbData.keys():
                 if curTime > (rgbData[rgbName]['aliveTimeStamp'] + aliveDelta) \
@@ -856,12 +1103,11 @@ class checkAliveThread(threading.Thread):
         self._stopevent.set( )
         threading.Thread.join(self, timeout)
 
-
 class mqttThread(threading.Thread):
     def __init__(self, name='mqttThread'):
-        self._stopevent = threading.Event( )
+        self._stopevent = threading.Event()
         self._sleepperiod = 1.0
-        threading.Thread.__init__(self, name=name)
+        super().__init__()
     def run(self):
         global mqttFlag
         global client
@@ -898,6 +1144,7 @@ def main():
     global dbName
     global client
     global app
+    global newObjWin
 
     # Читаем данные из БД
     readColorData()     # Цвета
@@ -906,7 +1153,10 @@ def main():
     readTermData()      # Терминалы
 
     app = QtWidgets.QApplication(sys.argv)  # Новый экземпляр QApplication
-    window = ExampleApp()  # Создаём объект класса ExampleApp
+    window = ExampleApp()   # Создаём объект класса ExampleApp
+
+    # newObjWin = uic.loadUi('DSQTNewObj.ui')  # Создаём объект для нового окка
+    # newObjWin.setParent(app)
 
     # Заполняем цветовые статусы в меню
     for cStatus in baseColors.keys():
@@ -916,32 +1166,27 @@ def main():
         if baseColors[cStatus][0] == baseData['colorStatus']:
             break
     # Меняем цвет
-
     baseStatusChanged(cStatus)
 
-    # Назначаем кнопки управления уровнем тревоги
-    window.butMinus1.clicked.connect(changeBaseScore)
-    window.butMinus5.clicked.connect(changeBaseScore)
-    window.butMinus10.clicked.connect(changeBaseScore)
-    window.butPlus1.clicked.connect(changeBaseScore)
-    window.butPlus5.clicked.connect(changeBaseScore)
-    window.butPlus10.clicked.connect(changeBaseScore)
-
     # Выводим данные по замкам
-
     for lockNum in lockOrder.keys():
         createLockFrame(lockNum,lockOrder[lockNum])
+    createLockExpand()
     lockExpanded(lockOrder[0])
+ #       setLockStatus(lockOrder[lockNum])
+
 
     # Выводим данные по терминалам
-
     for termNum in termOrder.keys():
         createTermFrame(termNum,termOrder[termNum])
+#        setTermStatus(termOrder[termNum])
     termExpanded(termOrder[0])
 
     # Настраиваем окно с журналом
     doc = window.logWindow.document()
     doc.setMaximumBlockCount(10)
+
+    # newObjectWinCreate('терминал', '192.168.0.200')
 
     window.show()  # Показываем главное окно
 
@@ -951,12 +1196,14 @@ def main():
     client.on_message = onMessage  # Привязываем функцию для исполнения при приходе сообщения в любом из подписанных каналов
     mqttConn = mqttThread()
     # Запускаем работу с MQTT
-    # mqttConn.start()
+    mqttConn.start()
 
     # Инициализируем проверку жизнеспособности устройств
     checkAlive = checkAliveThread()
     # Запускаем проверку жизнеспособности устройств
-    # checkAlive.start()
+    checkAlive.start()
+
+    # newObjectWinCreate('замок', '10.23.192.193')
 
     app.exec_()  # и запускаем приложение
 
@@ -970,3 +1217,4 @@ def main():
 
 if __name__ == '__main__':  # Если мы запускаем файл напрямую, а не импортируем
     main()  # то запускаем функцию main()
+

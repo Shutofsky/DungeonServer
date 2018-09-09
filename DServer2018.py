@@ -44,6 +44,9 @@ termData = dict()
 termOrder = dict()
 termIPtoName = dict()
 termNameToNum = dict()
+termLockReq = False
+termLockNameReq = ''
+termTermNameReq = ''
 
 rgbData = dict()
 
@@ -145,6 +148,10 @@ def onConnect(client, userdata, flags, rc):
     client.subscribe("PWRASK/#")     # Подписка на канал RGBASK
 
 def onMessage(client, userdata, msg):
+    global termLockReq
+    global termLockNameReq
+    global termTermNameReq
+    global alarmValue
     global lockOrder
     global lockData
     global lockIPtoName
@@ -164,7 +171,6 @@ def onMessage(client, userdata, msg):
             # Стукнулось неизвестное устройтство  - терминал
             if commList[0] != window.newObjIPAddr.text():
                 # Окно для этого устройства ещё не создано
-                print('Создаем окно')
                 newObjectWinCreate('терминал', commList[0])
         else:
             termName = termIPtoName[commList[0]]
@@ -181,6 +187,7 @@ def onMessage(client, userdata, msg):
                     #                    jsStr += '"msgBody":["' + '","'.join(termData[termName]['msgBody']) + '"]}'
                     jsStr = jsStr.rstrip(',') + "}"
                     publishLogged("TERM", commList[0] + "/UPDATEDB/" + jsStr)
+                    print('TermUpdated', jsStr)
                     termData[termName]['isAlive'] = 'True'
                     setTermActive(termName, True)
             elif commList[1] == 'LOCKED':
@@ -200,10 +207,18 @@ def onMessage(client, userdata, msg):
                 addTextLog(logStr)
                 #
                 # Обработка снижения уролвня тревоги
+                # Сбрасываем статус в зелёный и значение тревоги в 25
                 #
+                baseStatusChanged('3')
+                alarmValue = 25
+                window.baseScore.display(alarmValue)
                 window.checkAlarmTermReq.setChecked(True)
                 updateTermParm(termName, 'isLevelDown', 'YES')
             elif commList[1] == 'DOLOCKOPEN':
+                termLockReq = True
+                termLockNameReq = termData[termName]['lockName']
+                termTermNameReq = termName
+                print ('Trem Lock Open', termLockNameReq, termTermNameReq)
                 logStr = 'С терминала "' + termName + '" запрошено открытие замка "'
                 if termData[termName]['lockName'] in lockData.keys():
                     logStr += termData[termName]['lockName'] + '"!'
@@ -229,8 +244,14 @@ def onMessage(client, userdata, msg):
                         if parName != 'isAlive' and parName != 'aliveTimeStamp':
                             jsStr += '"' + parName + '":"' + str(lockData[lockName][parName]) + '",'
                     jsStr = jsStr.rstrip(',') + "}"
+                    publishLogged("LOCK", commList[0] + "/DELALLID")
+                    for idCode in lockData[lockName]['codes'].keys():
+                        publishLogged("LOCK", commList[0] + "/ADDID/"+idCode+"/"+ \
+                                               ','.join(lockData[lockName]['codes'][idCode]))
+
                     publishLogged("LOCK", commList[0] + "/SETPARAMS/" + jsStr)
                     lockData[lockName]['isAlive'] = 'True'
+                    print('LockUpdated', jsStr)
                     setLockActive(lockName, True)
             elif commList[1] == 'SOUND':
                 updateLockParm(lockName, 'isSound', 'YES')
@@ -242,8 +263,15 @@ def onMessage(client, userdata, msg):
                 updateLockParm(lockName, 'lockState', 'opened')
                 logStr = 'Замок "' + lockName + '" открыт'
                 addTextLog(logStr)
+                setButtonData(getObjectByName('butState_' + str(lockNum)), '#FF8080', 'Закрыть')
                 getObjectByName('butState_' + str(lockNum)).setEnabled(True)
                 getObjectByName('butBlock_' + str(lockNum)).setEnabled(True)
+                if termLockReq and termLockNameReq == lockName:
+                    window.checkLockTermReq.setChecked(False)
+                    updateTermParm(termTermNameReq, 'isLockOpen', 'NO')
+                    termLockReq = False
+                    termLockNameReq = ''
+                    termTermNameReq = ''
             elif commList[1] == 'CLOSED':
                 updateLockParm(lockName, 'lockState', 'closed')
                 logStr = 'Замок "' + lockName + '" закрыт'
@@ -294,15 +322,15 @@ def onMessage(client, userdata, msg):
         if commList[0] == 'AUX':
             # Запущено промежуточное питание
             if baseData['colorStatus'] == 'blue':
-                logStr = 'Силовой щиток - активировано вспомогательное питание! \n'
+                logStr = 'Силовой щиток - активировано вспомогательное питание!'
                 addTextLog(logStr)
                 baseStatusChanged(2)
         if commList[0] == 'PWR':
             # Запущено основное питание
             if baseData['colorStatus'] == 'lightblue':
-                logStr = 'Силовой щиток - запуск основного реактора! \n'
+                logStr = 'Силовой щиток - запуск основного реактора!'
                 addTextLog(logStr)
-                baseStatusChanged(2)
+                baseStatusChanged(3)
 
 def addTextLog(logString):
     dt = datetime.now()
@@ -1005,9 +1033,17 @@ def alarmChanged(delta):
     global alarmValue
     alarmValue += delta
     window.baseScore.display(alarmValue)
-    #
-    # Обработка изменения тревоги
-    #
+    if alarmValue>=50 and alarmValue<100:
+        # Смена статуса на жёлтый
+        if baseData['colorStatus'] == 'green':
+            logStr = 'Повышение уровня тревоги на ЖЁЛТЫЙ из-за активности на базе!!!'
+            addTextLog(logStr)
+            baseStatusChanged(4)
+    elif alarmValue>=100:
+        if baseData['colorStatus'] == 'green':
+            logStr = 'Повышение уровня тревоги на КРАСНЫЙ из-за активности на базе!!!'
+            addTextLog(logStr)
+            baseStatusChanged(5)
 
 def changeBaseStatus(colorIndex):
     global baseData
@@ -1025,9 +1061,16 @@ def baseStatusChanged(colorIndex):
     palette = window.baseFrame.palette()
     palette.setColor(palette.Background, QtGui.QColor(baseColors[colorIndex][0]))
     window.baseFrame.setPalette(palette)
-    #
-    # Дальше логическая обработка смены цвета базы, выдача команд и всё вот это вот.
-    #
+    for lockName in lockData.keys():
+        updateLockParm(lockName, 'baseState', baseData['colorStatus'])
+    if baseData['colorStatus'] == 'blue':
+        publishLogged('PWR', '/OFF/')
+    for commStr in baseCommand[baseData['colorStatus']]['rgbCommand']:
+        publishLogged('RGB', '*' + commStr)
+        time.sleep(0.1)
+    for commStr in baseCommand[baseData['colorStatus']]['termCommand']:
+        publishLogged('TERM', '*'+ commStr)
+        time.sleep(0.1)
 
 class ExampleApp(QtWidgets.QMainWindow):
     def __init__(self):

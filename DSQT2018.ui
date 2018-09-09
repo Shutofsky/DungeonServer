@@ -45,41 +45,6 @@
        <bold>true</bold>
       </font>
      </property>
-     <item>
-      <property name="text">
-       <string>Белый</string>
-      </property>
-     </item>
-     <item>
-      <property name="text">
-       <string>Синий</string>
-      </property>
-     </item>
-     <item>
-      <property name="text">
-       <string>Голубой</string>
-      </property>
-     </item>
-     <item>
-      <property name="text">
-       <string>Зелёный</string>
-      </property>
-     </item>
-     <item>
-      <property name="text">
-       <string>Жёлтый</string>
-      </property>
-     </item>
-     <item>
-      <property name="text">
-       <string>Красный</string>
-      </property>
-     </item>
-     <item>
-      <property name="text">
-       <string>Чёрный</string>
-      </property>
-     </item>
     </widget>
     <widget class="QPushButton" name="butMinus10">
      <property name="geometry">

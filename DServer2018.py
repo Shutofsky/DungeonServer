@@ -224,7 +224,7 @@ def onMessage(client, userdata, msg):
                     logStr += termData[termName]['lockName'] + '"!'
                     window.checkLockTermReq.setChecked(True)
                     updateTermParm(termName, 'isLockOpen', 'YES')
-                    publishLogged('LOCK', lockData[termData[termName]['lockName']]['IPAddr'] + '/OPEN')
+                    updateLockParm(termData[termName]['lockName'], 'lockState','opened')
                 addTextLog(logStr)
     elif msg.topic == 'LOCKASK':
         # Здесь должна быть обработка сообщений для канала LOCKASK
@@ -249,15 +249,14 @@ def onMessage(client, userdata, msg):
                         publishLogged("LOCK", commList[0] + "/ADDID/"+idCode+"/"+ \
                                                ','.join(lockData[lockName]['codes'][idCode]))
 
-                    publishLogged("LOCK", commList[0] + "/SETPARAMS/" + jsStr)
+                    updateLockParm("LOCK", commList[0] + "/SETPARAMS/" + jsStr)
                     lockData[lockName]['isAlive'] = 'True'
-                    print('LockUpdated', jsStr)
                     setLockActive(lockName, True)
             elif commList[1] == 'SOUND':
-                updateLockParm(lockName, 'isSound', 'YES')
+                updateLockParm(lockName, 'isSound', 'True')
                 getObjectByName('butSound_' + str(lockNum)).setEnabled(True)
             elif commList[1] == 'NOSOUND':
-                updateLockParm(lockName, 'isSound', 'NO')
+                updateLockParm(lockName, 'isSound', 'False')
                 getObjectByName('butSound_' + str(lockNum)).setEnabled(True)
             elif commList[1] == 'OPENED':
                 updateLockParm(lockName, 'lockState', 'opened')
@@ -356,20 +355,23 @@ def readColorData():
 def readBaseData():
     global baseData
     global baseCommand
+    global alarmValue
+
     jsStr = '{'
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
     for row in req.execute("SELECT colorStatus, alarmLevel \
                                      FROM baseStatus"):
-        jsStr += '"colorStatus":"' + row[0] + '","alarmLevel":"' + str(row[1]) + '",'
+        jsStr += '"colorStatus":"' + row[0] + '","alarmValue":"' + str(row[1]) + '",'
     jsStr = jsStr.rstrip(',') + '}'
     baseData = json.loads(jsStr)
+    alarmValue = baseData['alarmValue']
     jsStr = '{'
     req = conn.cursor()
     for row in req.execute("SELECT * \
                                     FROM baseCommands"):
-        lockStr=json.dumps(row[1].split('\n'))
-        termStr = json.dumps(row[2].split('\n'))
+        lockStr=json.dumps(row[1].split(','))
+        termStr = json.dumps(row[2].split(','))
         rgbStr = json.dumps(row[3].split('\n'))
         jsStr += '"'+row[0]+'":{"lockCommand":'+lockStr+',"termCommand":'+ \
                  termStr+',"rgbCommand":'+rgbStr+'},'
@@ -544,8 +546,6 @@ def lockStateChange():
         sender.setStyleSheet("QPushButton:hover { background-color: " + bgColor + " }")
         sender.setStyleSheet("QPushButton:!hover { background-color: " + bgColor + " }")
     # MQTT sending here
-    jStr = '{"' + parmName + '":"' + parmVal + '"}'
-    publishLogged("LOCK", lockData[lockName]['IPAddr'] + "/SETPARMS/" + jStr)
     updateLockParm(lockName, parmName, parmVal)
 
 def lockCardChange():
@@ -611,19 +611,28 @@ def updateLockParm(lockName,parName,parValue):
     global lockData
     global lockIPtoName
     global mqttFlag
-    IPAddr = lockData[lockName]['IPAddr']
-    lockData[lockName][parName] = parValue
+    lockList = []
+    if lockName == '*':
+        for lName in lockData.keys():
+            lockList.append(lName)
+    else:
+        lockList.append(lockName)
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
-    reqStr = "UPDATE lockStatus SET "+parName+" = ? WHERE name = ?"
-    print (reqStr)
-    req.execute(reqStr,[str(parValue),str(lockName)])
-    conn.commit()
+    for lName in lockList:
+        IPAddr = lockData[lName]['IPAddr']
+        lockData[lName][parName] = parValue
+        reqStr = "UPDATE lockStatus SET "+parName+" = ? WHERE name = ?"
+        req.execute(reqStr,[str(parValue),str(lName)])
+        conn.commit()
+        if parName=='IPAddr':
+            del(lockIPtoName[IPAddr])
+            lockIPtoName[parValue] = lName
     conn.close()
-    if parName=='IPAddr':
-        del(lockIPtoName[IPAddr])
-        lockIPtoName[parValue] = lockName
-        return
+    if lockName == '*':
+        publishLogged('LOCK', '*/SETPARMS/{"' + parName + '":"' + parValue + '"}')
+    else:
+        publishLogged('LOCK', IPAddr+'/SETPARMS/{"' + parName + '":"' + parValue + '"}')
 
 def termIPChange():
     doc = QtGui.QTextDocument()
@@ -678,21 +687,28 @@ def updateTermParm(termName,parName,parValue):
     global dbName
     global termData
     global termIPtoName
-    IPAddr = termData[termName]['IPAddr']
-    termData[termName][parName] = parValue
+    termList = []
+    if termName == '*':
+        for tName in termData.keys():
+            termList.append(tName)
+    else:
+        termList.append(termName)
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
-    reqStr = "UPDATE termStatus SET "+parName+" = ? WHERE name = ?"
-    req.execute(reqStr,[str(parValue),str(termName)])
-    conn.commit()
+    for tName in termList:
+        IPAddr = termData[tName]['IPAddr']
+        termData[tName][parName] = parValue
+        reqStr = "UPDATE termStatus SET "+parName+" = ? WHERE name = ?"
+        req.execute(reqStr,[str(parValue),str(tName)])
+        conn.commit()
+        if parName=='IPAddr':
+            del(termIPtoName[IPAddr])
+            termIPtoName[parValue] = lName
     conn.close()
-    if parName=='IPAddr':
-        del(termIPtoName[IPAddr])
-        termIPtoName[parValue] = termName
-        return
-    # MQTT sending here
-    jStr = '{"' + parName + '":"' + parValue + '"}'
-    publishLogged("TERM", IPAddr + "/UPDATEDB/" + jStr)
+    if termName == '*':
+        publishLogged('TERM', '*/UPDATEDB/{"' + parName + '":"' + parValue + '"}')
+    else:
+        publishLogged('TERM', IPAddr+'/UPDATEDB/{"' + parName + '":"' + parValue + '"}')
 
 def termExpandParm():
     global termData
@@ -1044,6 +1060,12 @@ def alarmChanged(delta):
             logStr = 'Повышение уровня тревоги на КРАСНЫЙ из-за активности на базе!!!'
             addTextLog(logStr)
             baseStatusChanged(5)
+    conn = sqlite3.connect(dbName)
+    req = conn.cursor()
+    reqStr = "UPDATE baseStatus SET alarmLevel = ?"
+    req.execute(reqStr,[alarmValue])
+    conn.commit()
+    conn.close()
 
 def changeBaseStatus(colorIndex):
     global baseData
@@ -1061,16 +1083,27 @@ def baseStatusChanged(colorIndex):
     palette = window.baseFrame.palette()
     palette.setColor(palette.Background, QtGui.QColor(baseColors[colorIndex][0]))
     window.baseFrame.setPalette(palette)
-    for lockName in lockData.keys():
-        updateLockParm(lockName, 'baseState', baseData['colorStatus'])
+    window.baseScore.display(alarmValue)
+    conn = sqlite3.connect(dbName)
+    req = conn.cursor()
+    reqStr = "UPDATE baseStatus SET colorStatus = ?"
+    req.execute(reqStr,[baseData['colorStatus']])
+    conn.commit()
+    conn.close()
     if baseData['colorStatus'] == 'blue':
         publishLogged('PWR', '/OFF/')
     for commStr in baseCommand[baseData['colorStatus']]['rgbCommand']:
         publishLogged('RGB', '*' + commStr)
         time.sleep(0.1)
-    for commStr in baseCommand[baseData['colorStatus']]['termCommand']:
-        publishLogged('TERM', '*'+ commStr)
+    for commStr in baseCommand[baseData['colorStatus']]['lockCommand']:
+        (parName,parVal) = commStr.split(':')
+        updateLockParm('*', parName, parVal)
         time.sleep(0.1)
+    for commStr in baseCommand[baseData['colorStatus']]['termCommand']:
+        (parName,parVal) = commStr.split(':')
+        updateTermParm('*', parName, parVal)
+        time.sleep(0.1)
+
 
 class ExampleApp(QtWidgets.QMainWindow):
     def __init__(self):

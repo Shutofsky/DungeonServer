@@ -15,9 +15,9 @@ window = None
 
 # Настройки MQTT
 #
-mqtt_broker_ip = '192.168.0.200'
+# mqtt_broker_ip = '192.168.0.200'
 # mqtt_broker_ip = 'localhost'
-# mqtt_broker_ip = '10.23.192.193'
+mqtt_broker_ip = '10.23.192.193'
 mqtt_broker_port = 1883
 mqttFlag = False
 
@@ -187,21 +187,18 @@ def onMessage(client, userdata, msg):
                     #                    jsStr += '"msgBody":["' + '","'.join(termData[termName]['msgBody']) + '"]}'
                     jsStr = jsStr.rstrip(',') + "}"
                     publishLogged("TERM", commList[0] + "/UPDATEDB/" + jsStr)
-                    print('TermUpdated', jsStr)
                     termData[termName]['isAlive'] = 'True'
                     setTermActive(termName, True)
             elif commList[1] == 'LOCKED':
                 logStr = 'Терминал "' + termName + '" заблокирован!'
                 addTextLog(logStr)
                 alarmChanged(+10)
-                setButtonData(getObjectByName('butLock_' + str(termNum)), '#FF8080', 'Разблокировать')
-                updateTermParm(termName, 'isLocked', 'YES')
+                updateTermParm(termName, 'isLocked:YES')
             elif commList[1] == 'HACKED':
                 logStr = 'Терминал "' + termName + '" взломан!\n'
                 addTextLog(logStr)
                 alarmChanged(+5)
-                setButtonData(getObjectByName('butHack_' + str(termNum)), '#FF8080', 'Отмена взлома')
-                updateTermParm(termName, 'isHacked', 'YES')
+                updateTermParm(termName, 'isHacked:YES')
             elif commList[1] == 'DOLEVELDOWN':
                 logStr = 'С терминала "' + termName + '" запрошено снижение уровня тревоги!'
                 addTextLog(logStr)
@@ -212,8 +209,7 @@ def onMessage(client, userdata, msg):
                 baseStatusChanged('3')
                 alarmValue = 25
                 window.baseScore.display(alarmValue)
-                window.checkAlarmTermReq.setChecked(True)
-                updateTermParm(termName, 'isLevelDown', 'YES')
+                updateTermParm(termName, 'isLevelDown:YES')
             elif commList[1] == 'DOLOCKOPEN':
                 termLockReq = True
                 termLockNameReq = termData[termName]['lockName']
@@ -222,9 +218,8 @@ def onMessage(client, userdata, msg):
                 logStr = 'С терминала "' + termName + '" запрошено открытие замка "'
                 if termData[termName]['lockName'] in lockData.keys():
                     logStr += termData[termName]['lockName'] + '"!'
-                    window.checkLockTermReq.setChecked(True)
-                    updateTermParm(termName, 'isLockOpen', 'YES')
-                    updateLockParm(termData[termName]['lockName'], 'lockState','opened')
+                    updateTermParm(termName, 'isLockOpen:YES')
+                    updateLockParm(termData[termName]['lockName'], 'lockState:opened')
                 addTextLog(logStr)
     elif msg.topic == 'LOCKASK':
         # Здесь должна быть обработка сообщений для канала LOCKASK
@@ -249,43 +244,32 @@ def onMessage(client, userdata, msg):
                         publishLogged("LOCK", commList[0] + "/ADDID/"+idCode+"/"+ \
                                                ','.join(lockData[lockName]['codes'][idCode]))
 
-                    updateLockParm("LOCK", commList[0] + "/SETPARAMS/" + jsStr)
+                    publishLogged("LOCK", commList[0] + "/SETPARAMS/" + jsStr)
                     lockData[lockName]['isAlive'] = 'True'
                     setLockActive(lockName, True)
             elif commList[1] == 'SOUND':
-                updateLockParm(lockName, 'isSound', 'True')
-                getObjectByName('butSound_' + str(lockNum)).setEnabled(True)
+                updateLockParm(lockName, 'isSound:True')
             elif commList[1] == 'NOSOUND':
-                updateLockParm(lockName, 'isSound', 'False')
-                getObjectByName('butSound_' + str(lockNum)).setEnabled(True)
+                updateLockParm(lockName, 'isSound:False')
             elif commList[1] == 'OPENED':
-                updateLockParm(lockName, 'lockState', 'opened')
+                updateLockParm(lockName, 'lockState:opened')
                 logStr = 'Замок "' + lockName + '" открыт'
                 addTextLog(logStr)
-                setButtonData(getObjectByName('butState_' + str(lockNum)), '#FF8080', 'Закрыть')
-                getObjectByName('butState_' + str(lockNum)).setEnabled(True)
-                getObjectByName('butBlock_' + str(lockNum)).setEnabled(True)
                 if termLockReq and termLockNameReq == lockName:
-                    window.checkLockTermReq.setChecked(False)
-                    updateTermParm(termTermNameReq, 'isLockOpen', 'NO')
+                    updateTermParm(termTermNameReq, 'isLockOpen:NO')
                     termLockReq = False
                     termLockNameReq = ''
                     termTermNameReq = ''
             elif commList[1] == 'CLOSED':
-                updateLockParm(lockName, 'lockState', 'closed')
+                updateLockParm(lockName, 'lockState:closed')
                 logStr = 'Замок "' + lockName + '" закрыт'
                 addTextLog(logStr)
-                getObjectByName('butState_' + str(lockNum)).setEnabled(True)
-                getObjectByName('butBlock_' + str(lockNum)).setEnabled(True)
             elif commList[1] == 'BLOCKED':
-                updateLockParm(lockName, 'lockState', 'blocked')
+                updateLockParm(lockName, 'lockState:blocked')
                 logStr = 'Замок "' + lockName + '" заблокирован'
                 addTextLog(logStr)
-                getObjectByName('butState_' + str(lockNum)).setEnabled(False)
-                getObjectByName('butBlock_' + str(lockNum)).setEnabled(True)
             elif commList[1] == 'CODE':
                 logStr = 'К замку "' + lockName + '" приложена карта ' + commList[3]
-                dt = datetime.now()
                 if commList[2] == 'RIGHT':
                     logStr += ' ВЕРНО!!!'
                 elif commList[2] == 'STATUSWRONG':
@@ -477,11 +461,11 @@ def newItemReg():
     if objType == 'замок':
         if window.lockNameExpand.text() == objName:
             window.entryIPAddrLock.setText(IPAddr)
-        updateLockParm(objName,'IPAddr',IPAddr)
+        updateLockParm(objName,'IPAddr:'+IPAddr)
     elif objType == 'терминал':
         if window.termNameExp.text() == objName:
             window.entryIPAddrTerm.setText(IPAddr)
-        updateTermParm(objName, 'IPAddr', IPAddr)
+        updateTermParm(objName, 'IPAddr:'+IPAddr)
     window.newObjType.setText('')
     window.newObjIPAddr.setText('')
     window.newObjList.clear()
@@ -491,7 +475,7 @@ def lockIPChange():
     doc.setHtml(window.lockNameExpand.text())
     lockName = doc.toPlainText()
     lockIP = window.entryIPAddrLock.text()
-    updateLockParm(lockName, 'IPAddr', lockIP)
+    updateLockParm(lockName, 'IPAddr:'+lockIP)
 
 def lockStateChange():
     global lockData
@@ -546,7 +530,7 @@ def lockStateChange():
         sender.setStyleSheet("QPushButton:hover { background-color: " + bgColor + " }")
         sender.setStyleSheet("QPushButton:!hover { background-color: " + bgColor + " }")
     # MQTT sending here
-    updateLockParm(lockName, parmName, parmVal)
+    updateLockParm(lockName, parmName+':'+parmVal)
 
 def lockCardChange():
     sender = window.sender()
@@ -606,7 +590,7 @@ def updateLockCard(lockName, cardCode, colorCode, mode):
         publishLogged("LOCK", IPAddr + "/CHGID/" + cardCode + "/" + ','.join(addColorList))
     conn.close()
 
-def updateLockParm(lockName,parName,parValue):
+def updateLockParm(lockName,parmData):
     global dbName
     global lockData
     global lockIPtoName
@@ -617,29 +601,63 @@ def updateLockParm(lockName,parName,parValue):
             lockList.append(lName)
     else:
         lockList.append(lockName)
+    parmList = parmData.split(',')
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
-    for lName in lockList:
-        IPAddr = lockData[lName]['IPAddr']
-        lockData[lName][parName] = parValue
-        reqStr = "UPDATE lockStatus SET "+parName+" = ? WHERE name = ?"
-        req.execute(reqStr,[str(parValue),str(lName)])
-        conn.commit()
-        if parName=='IPAddr':
-            del(lockIPtoName[IPAddr])
-            lockIPtoName[parValue] = lName
+    jStr='{'
+    for parm in parmList:
+        (parmName,parmValue) = parm.split(':')
+        if parmName!='IPAddr':
+            jStr += '"'+str(parmName)+'":"'+str(parmValue)+'",'
+        for lName in lockList:
+            lockNum = lockNameToNum[lName]
+            if parmName == 'lockState':
+                if parmValue == 'closed':
+                    setButtonData(getObjectByName("butState_" + str(lockNum)), 'lightGreen', 'Открыть')
+                    setButtonData(getObjectByName("butBlock_" + str(lockNum)), 'lightGreen', 'Заблокировать')
+                    getObjectByName("butBlock_" + str(lockNum)).setEnabled(True)
+                    getObjectByName("butState_" + str(lockNum)).setEnabled(True)
+                elif parmValue == 'opened':
+                    setButtonData(getObjectByName("butState_" + str(lockNum)), '#FF8080', 'Закрыть')
+                    setButtonData(getObjectByName("butBlock_" + str(lockNum)), 'lightGreen', 'Заблокировать')
+                    getObjectByName("butBlock_" + str(lockNum)).setEnabled(True)
+                    getObjectByName("butState_" + str(lockNum)).setEnabled(True)
+                else:
+                    setButtonData(getObjectByName("butState_" + str(lockNum)), 'lightGreen', 'Открыть')
+                    setButtonData(getObjectByName("butBlock_" + str(lockNum)), '#FF8080', 'Разблокировать')
+                    getObjectByName("butBlock_" + str(lockNum)).setEnabled(True)
+                    getObjectByName("butState_" + str(lockNum)).setEnabled(False)
+            elif parmName == 'isSound':
+                if parmValue == 'True':
+                    setButtonData(getObjectByName("butSound_" + str(lockNum)), 'lightGreen', 'Звук ВЫКЛ')
+                else:
+                    setButtonData(getObjectByName("butSound_" + str(lockNum)), '#FF8080', 'Звук ВКЛ')
+            lockData[lName][parmName] = parmValue
+            reqStr = "UPDATE lockStatus SET "+parmName+" = ? WHERE name = ?"
+            req.execute(reqStr,[str(parmValue),str(lName)])
+            conn.commit()
+            IPAddr = lockData[lockList[0]]['IPAddr']
+            if parmName == 'IPAddr':
+                del (lockIPtoName[IPAddr])
+                lockIPtoName[parmValue] = lockList[0]
+            if lockData[lName]['isAlive'] == 'True':
+                setLockActive(lName, True)
+            else:
+                setLockActive(lName, False)
     conn.close()
-    if lockName == '*':
-        publishLogged('LOCK', '*/SETPARMS/{"' + parName + '":"' + parValue + '"}')
-    else:
-        publishLogged('LOCK', IPAddr+'/SETPARMS/{"' + parName + '":"' + parValue + '"}')
+    jStr = jStr.rstrip() +'}'
+    if jStr!='{}':
+        if lockName == '*':
+            publishLogged('LOCK', '*/SETPARMS/' + jStr)
+        else:
+            publishLogged('LOCK', IPAddr+'/SETPARMS/' + jStr)
 
 def termIPChange():
     doc = QtGui.QTextDocument()
     doc.setHtml(window.termNameExp.text())
     termName = doc.toPlainText()
     termIP = window.entryIPAddrTerm.text()
-    updateTermParm(termName, 'IPAddr', termIP)
+    updateTermParm(termName, 'IPAddr:'+termIP)
 
 def termStateChange():
     global termData
@@ -681,34 +699,86 @@ def termStateChange():
     sender.setText(bText)
     sender.setStyleSheet("QPushButton:hover { background-color: " + bgColor + " }")
     sender.setStyleSheet("QPushButton:!hover { background-color: " + bgColor + " }")
-    updateTermParm(termName, parmName, parmVal)
+    updateTermParm(termName, parmName+':'+parmVal)
 
-def updateTermParm(termName,parName,parValue):
+def updateTermParm(termName,parmData):
     global dbName
     global termData
     global termIPtoName
     termList = []
+    parmList = parmData.split(',')
+    conn = sqlite3.connect(dbName)
+    req = conn.cursor()
     if termName == '*':
         for tName in termData.keys():
             termList.append(tName)
     else:
         termList.append(termName)
-    conn = sqlite3.connect(dbName)
-    req = conn.cursor()
-    for tName in termList:
-        IPAddr = termData[tName]['IPAddr']
-        termData[tName][parName] = parValue
-        reqStr = "UPDATE termStatus SET "+parName+" = ? WHERE name = ?"
-        req.execute(reqStr,[str(parValue),str(tName)])
-        conn.commit()
-        if parName=='IPAddr':
-            del(termIPtoName[IPAddr])
-            termIPtoName[parValue] = lName
+    jStr = '{'
+    for parm in parmList:
+        (parmName, parmValue) = parm.split(':')
+        if parmName!='IPAddr':
+            jStr += '"'+str(parmName)+'":"'+str(parmValue)+'",'
+        for tName in termList:
+            termNum = termNameToNum[tName]
+            if parmName == 'isPowerOn':
+                if parmValue == 'YES':
+                    setButtonData(getObjectByName("butPower_" + str(termNum)), 'lightGreen', 'Питание ВЫКЛ')
+                else:
+                    setButtonData(getObjectByName("butPower_" + str(termNum)), '#FF8080', 'Питание ВКЛ')
+            elif parmName == 'isLocked':
+                if parmValue == 'NO':
+                    setButtonData(getObjectByName("butLock_" + str(termNum)), 'lightGreen', 'Заблокировать')
+                else:
+                    setButtonData(getObjectByName("butLock_" + str(termNum)), '#FF8080', 'Разблокировать')
+            elif parmName == 'isHacked':
+                if parmValue == 'NO':
+                    setButtonData(getObjectByName("butHack_" + str(termNum)), 'lightGreen', 'Взломать')
+                else:
+                    setButtonData(getObjectByName("butHack_" + str(termNum)), '#FF8080', 'Отмена взлома')
+            if tName == window.termNameExp.text():
+                if parmName == 'wordsPrinted':
+                    window.termWordPrint.setCurrentIndex(window.termWordPrint.findText(str(parmValue)))
+                elif parmName == 'wordLength':
+                    window.termWordLength.setCurrentIndex(window.termWordLength.findText(str(parmValue)))
+                elif parmName == 'isLevelDown':
+                    if parmValue == 'YES':
+                        window.checkAlarmTermReq.setChecked(True)
+                    else:
+                        window.checkAlarmTermReq.setChecked(False)
+                elif parmName == 'isLockOpene':
+                    if parmValue == 'YES':
+                        window.checkLockTermReq.setChecked(True)
+                    else:
+                        window.checkLockTermReq.setChecked(False)
+                elif parmName == 'menuList':
+                    window.checkLockTerm.setChecked(False)
+                    window.checkAlarmTerm.setChecked(False)
+                    window.checkTextTerm.setChecked(False)
+                    mList = parmValue.split(',')
+                    if '1' in mList:
+                        window.checkLockTerm.setChecked(True)
+                    if '2' in mList:
+                        window.checkAlarmTerm.setChecked(True)
+                    if '3' in mList:
+                        window.checkTextTerm.setChecked(True)
+                elif parmName == 'lockName':
+                    window.termLockLink.setCurrentIndex(window.termLockLink.findText(str(parmValue)))
+            IPAddr = termData[tName]['IPAddr']
+            termData[tName][parmName] = parmValue
+            reqStr = "UPDATE termStatus SET "+parmName+" = ? WHERE name = ?"
+            req.execute(reqStr,[str(parmValue),str(tName)])
+            conn.commit()
+            if parmName=='IPAddr':
+                del(termIPtoName[IPAddr])
+                termIPtoName[parmValue] = tName
     conn.close()
-    if termName == '*':
-        publishLogged('TERM', '*/UPDATEDB/{"' + parName + '":"' + parValue + '"}')
-    else:
-        publishLogged('TERM', IPAddr+'/UPDATEDB/{"' + parName + '":"' + parValue + '"}')
+    jStr = jStr.rstrip() +'}'
+    if jStr!='{}':
+        if termName == '*':
+            publishLogged('TERM', '*/UPDATEDB/' + jStr)
+        else:
+            publishLogged('TERM', IPAddr+'/UPDATEDB/' + jStr)
 
 def termExpandParm():
     global termData
@@ -768,7 +838,7 @@ def termExpandParm():
             newMenuList.remove('3')
         newMenuList.sort()
         parmValue = ','.join(newMenuList)
-    updateTermParm(termName, parmName, parmValue)
+    updateTermParm(termName, parmName+':'+parmValue)
 
 def termUpdateText():
     global termData
@@ -1095,14 +1165,9 @@ def baseStatusChanged(colorIndex):
     for commStr in baseCommand[baseData['colorStatus']]['rgbCommand']:
         publishLogged('RGB', '*' + commStr)
         time.sleep(0.1)
-    for commStr in baseCommand[baseData['colorStatus']]['lockCommand']:
-        (parName,parVal) = commStr.split(':')
-        updateLockParm('*', parName, parVal)
-        time.sleep(0.1)
-    for commStr in baseCommand[baseData['colorStatus']]['termCommand']:
-        (parName,parVal) = commStr.split(':')
-        updateTermParm('*', parName, parVal)
-        time.sleep(0.1)
+    print(','.join(baseCommand[baseData['colorStatus']]['lockCommand']))
+    updateLockParm('*', ','.join(baseCommand[baseData['colorStatus']]['lockCommand']))
+    updateTermParm('*', ','.join(baseCommand[baseData['colorStatus']]['termCommand']))
 
 
 class ExampleApp(QtWidgets.QMainWindow):
@@ -1231,8 +1296,20 @@ def main():
     app = QtWidgets.QApplication(sys.argv)  # Новый экземпляр QApplication
     window = ExampleApp()   # Создаём объект класса ExampleApp
 
-    # newObjWin = uic.loadUi('DSQTNewObj.ui')  # Создаём объект для нового окка
-    # newObjWin.setParent(app)
+    # Выводим данные по замкам
+    for lockNum in lockOrder.keys():
+        createLockFrame(lockNum,lockOrder[lockNum])
+    createLockExpand()
+    lockExpanded(lockOrder[0])
+
+    # Выводим данные по терминалам
+    for termNum in termOrder.keys():
+        createTermFrame(termNum,termOrder[termNum])
+    termExpanded(termOrder[0])
+
+    # Настраиваем окно с журналом
+    doc = window.logWindow.document()
+    doc.setMaximumBlockCount(10)
 
     # Заполняем цветовые статусы в меню
     for cStatus in baseColors.keys():
@@ -1243,26 +1320,6 @@ def main():
             break
     # Меняем цвет
     baseStatusChanged(cStatus)
-
-    # Выводим данные по замкам
-    for lockNum in lockOrder.keys():
-        createLockFrame(lockNum,lockOrder[lockNum])
-    createLockExpand()
-    lockExpanded(lockOrder[0])
- #       setLockStatus(lockOrder[lockNum])
-
-
-    # Выводим данные по терминалам
-    for termNum in termOrder.keys():
-        createTermFrame(termNum,termOrder[termNum])
-#        setTermStatus(termOrder[termNum])
-    termExpanded(termOrder[0])
-
-    # Настраиваем окно с журналом
-    doc = window.logWindow.document()
-    doc.setMaximumBlockCount(10)
-
-    # newObjectWinCreate('терминал', '192.168.0.200')
 
     window.show()  # Показываем главное окно
 

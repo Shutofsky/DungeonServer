@@ -164,6 +164,7 @@ def onMessage(client, userdata, msg):
     global termNameToNum
     global window
     commList = msg.payload.decode('utf-8').split('/')  # Разделяем тело сообщения на элементы списка по знаку /
+    # print (commList[1])
     # commList[0] - IP-адрес устройства, и т.д.
     if msg.topic == 'TERMASK':
         # Здесь должна быть обработка сообщений для канала TERMASK
@@ -174,7 +175,7 @@ def onMessage(client, userdata, msg):
                 newObjectWinCreate('терминал', commList[0])
         else:
             termName = termIPtoName[commList[0]]
-            termNum = termNameToNum[termName]
+            # termNum = termNameToNum[termName]
             if commList[1] == 'PONG':
                 termData[termName]['aliveTimeStamp'] = millis()
                 if termData[termName]['isAlive'] == "False":
@@ -195,9 +196,10 @@ def onMessage(client, userdata, msg):
                 alarmChanged(+10)
                 updateTermParm(termName, 'isLocked:YES')
             elif commList[1] == 'HACKED':
-                logStr = 'Терминал "' + termName + '" взломан!\n'
+                logStr = 'Терминал "' + termName + '" взломан!'
                 addTextLog(logStr)
                 alarmChanged(+5)
+                # print('Hacked from term')
                 updateTermParm(termName, 'isHacked:YES')
             elif commList[1] == 'DOLEVELDOWN':
                 logStr = 'С терминала "' + termName + '" запрошено снижение уровня тревоги!'
@@ -214,7 +216,7 @@ def onMessage(client, userdata, msg):
                 termLockReq = True
                 termLockNameReq = termData[termName]['lockName']
                 termTermNameReq = termName
-                print ('Trem Lock Open', termLockNameReq, termTermNameReq)
+                # print ('Trem Lock Open', termLockNameReq, termTermNameReq)
                 logStr = 'С терминала "' + termName + '" запрошено открытие замка "'
                 if termData[termName]['lockName'] in lockData.keys():
                     logStr += termData[termName]['lockName'] + '"!'
@@ -349,7 +351,7 @@ def readBaseData():
         jsStr += '"colorStatus":"' + row[0] + '","alarmValue":"' + str(row[1]) + '",'
     jsStr = jsStr.rstrip(',') + '}'
     baseData = json.loads(jsStr)
-    alarmValue = baseData['alarmValue']
+    alarmValue = int(baseData['alarmValue'])
     jsStr = '{'
     req = conn.cursor()
     for row in req.execute("SELECT * \
@@ -448,13 +450,15 @@ def newObjectWinCreate(objType,IPAddr):
     for objNum in objOrder.keys():
         window.newObjList.addItem(objOrder[objNum])
     window.newObjList.setCurrentIndex(window.newObjList.findText(objOrder[0]))
+    window.newObjList.setEnabled(True)
+
 
 def newItemReg():
     global newObjWin
     global window
-    print(window.newObjIPAddr.text())
-    print(window.newObjList.currentText())
-    print(window.newObjType.text())
+    #print(window.newObjIPAddr.text())
+    #print(window.newObjList.currentText())
+    #print(window.newObjType.text())
     objType = window.newObjType.text()
     IPAddr = window.newObjIPAddr.text()
     objName = window.newObjList.currentText()
@@ -469,6 +473,7 @@ def newItemReg():
     window.newObjType.setText('')
     window.newObjIPAddr.setText('')
     window.newObjList.clear()
+    window.newObjList.setEnabled(False)
 
 def lockIPChange():
     doc = QtGui.QTextDocument()
@@ -549,7 +554,7 @@ def updateLockCard(lockName, cardCode, colorCode, mode):
     global dbName
     global mqttFlag
     colorName = baseColors[colorCode][0]
-    print(lockName, cardCode, colorCode, colorName)
+    # print(lockName, cardCode, colorCode, colorName)
     IPAddr = lockData[lockName]['IPAddr']
     conn = sqlite3.connect(dbName)
     req = conn.cursor()
@@ -563,7 +568,7 @@ def updateLockCard(lockName, cardCode, colorCode, mode):
         colorList = list(lockData[lockName]['codes'][cardCode])
         newColorList = []
         if mode == 'True':
-            print(colorList)
+            # print(colorList)
             colorList.append(str(colorName))
         else:
             colorList.remove(str(colorName))
@@ -645,7 +650,7 @@ def updateLockParm(lockName,parmData):
             else:
                 setLockActive(lName, False)
     conn.close()
-    jStr = jStr.rstrip() +'}'
+    jStr = jStr.rstrip(',') +'}'
     if jStr!='{}':
         if lockName == '*':
             publishLogged('LOCK', '*/SETPARMS/' + jStr)
@@ -773,7 +778,8 @@ def updateTermParm(termName,parmData):
                 del(termIPtoName[IPAddr])
                 termIPtoName[parmValue] = tName
     conn.close()
-    jStr = jStr.rstrip() +'}'
+    jStr = jStr.rstrip(',') +'}'
+    # print (jStr)
     if jStr!='{}':
         if termName == '*':
             publishLogged('TERM', '*/UPDATEDB/' + jStr)
@@ -1117,7 +1123,8 @@ def changeBaseScore():
 def alarmChanged(delta):
     global window
     global alarmValue
-    alarmValue += delta
+    alarmValue += int(delta)
+    # print('alarmChanged to ' + str(alarmValue))
     window.baseScore.display(alarmValue)
     if alarmValue>=50 and alarmValue<100:
         # Смена статуса на жёлтый
@@ -1165,7 +1172,7 @@ def baseStatusChanged(colorIndex):
     for commStr in baseCommand[baseData['colorStatus']]['rgbCommand']:
         publishLogged('RGB', '*' + commStr)
         time.sleep(0.1)
-    print(','.join(baseCommand[baseData['colorStatus']]['lockCommand']))
+    # print(','.join(baseCommand[baseData['colorStatus']]['lockCommand']))
     updateLockParm('*', ','.join(baseCommand[baseData['colorStatus']]['lockCommand']))
     updateTermParm('*', ','.join(baseCommand[baseData['colorStatus']]['termCommand']))
 
